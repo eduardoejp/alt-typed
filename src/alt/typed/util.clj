@@ -7,14 +7,16 @@
       (instance?                Short form)
       (instance?              Integer form)
       (instance?                 Long form)
+      (instance?  clojure.lang.BigInt form)
+      (instance? java.math.BigInteger form)
       (instance?                Float form)
       (instance?               Double form)
+      (instance? java.math.BigDecimal form)
       (instance?            Character form)
       (instance?               String form)
       (instance? clojure.lang.Keyword form)
       (instance?  clojure.lang.Symbol form)
-      (instance? java.math.BigDecimal form)
-      (instance?  clojure.lang.BigInt form)))
+      ))
 
 (defn partial* [f & args]
   #(apply f % args))

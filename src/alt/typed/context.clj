@@ -12,43 +12,7 @@
   (enter-ns [context ns]))
 
 ;; [Implementations]
-(defrecord Context [_current-ns _namespaces _library _graph]
-  &&graph/$TypeGraph
-  (&&graph/ann [self var-name node-id]
-    (update-in self [:_graph] &&graph/ann var-name node-id))
-  (&&graph/get-var [self id]
-    (&&graph/get-var _graph id))
-  (&&graph/add-var [self var-name type]
-    (let [[_graph $node] (&&graph/add-var _graph var-name type)]
-      [(assoc self :_graph _graph)
-       $node]))
-  (&&graph/get-type [self id]
-    (&&graph/get-type _graph id))
-  (&&graph/add-type [self type]
-    (let [[_graph $node] (&&graph/add-type _graph type)]
-      [(assoc self :_graph _graph)
-       $node]))
-  (&&graph/constrain [self id top]
-    (update-in self [:_graph] &&graph/constrain id top))
-  (&&graph/find [self binding-name]
-    (&&graph/find _graph binding-name))
-  (&&graph/push [self frame]
-    (update-in self [:_graph] &&graph/push frame))
-  (&&graph/pop [self]
-    (update-in self [:_graph] &&graph/pop))
-  (&&graph/instance [self type-fn]
-    (let [[_graph =type] (&&graph/instance _graph type-fn)]
-      [(assoc self :_graph _graph)
-       =type]))
-
-  &&library/$Library
-  (&&library/save [self type-name type]
-    (when-let [ns (namespace type-name)]
-      (assert (= _current-ns (symbol ns)) (str "Can't save types belonging to another namespace [" type-name "]")))
-    (update-in self [:_library] &&library/save type-name type))
-  (&&library/lookup [selfx type-name]
-    (&&library/lookup _library type-name))
-
+(defrecord Context [_current-ns _namespaces]
   $Context
   (current-ns [self]
     (get _namespaces _current-ns))
@@ -83,4 +47,6 @@
 
 ;; [Constants]
 (def +new-context+
-  (Context. nil {} &&library/+new-library+ &&graph/+new-graph+))
+  (-> (Context. nil {})
+      &&graph/install
+      &&library/install))

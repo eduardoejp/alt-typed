@@ -4,6 +4,7 @@
             (alt.typed.context [graph :as &graph]))
   (:import (alt.typed.type LiteralType
                            ClassType
+                           FnType
                            TypeVar
                            AliasType
                            OrType
@@ -13,9 +14,28 @@
                            NothingType
                            NilType)))
 
+(def ^:private ^:dynamic *types-hierarchy*
+  (-> (make-hierarchy)
+      (derive AliasType        ::type)
+      (derive ::real-type      ::type)
+      (derive ::complex-type   ::real-type)
+      (derive NotType          ::complex-type)
+      (derive OrType           ::complex-type)
+      (derive ::simple-type    ::real-type)
+      (derive AnyType          ::simple-type)
+      (derive ::bounded-type   ::simple-type)
+      (derive NothingType      ::bounded-type)
+      (derive ::unit-type      ::bounded-type)
+      (derive NilType          ::unit-type)
+      (derive LiteralType      ::unit-type)
+      (derive ::open-type      ::bounded-type)
+      (derive ClassType        ::open-type)
+      (derive FnType           ::open-type)
+      ))
+
 ;; [Functions]
 (defmulti solve (fn [graph expected actual] [(class expected) (class actual)])
-  :hierarchy #'&type/*types-hierarchy*)
+  :hierarchy #'*types-hierarchy*)
 
 ;; (defmethod solve [::&type/type AliasType] [graph =expected ^AliasType =actual]
 ;;   (prn 'solve [::&type/type AliasType])
@@ -98,7 +118,7 @@
 ;; TODO: Rewrite 'narrow to simplify it.
 ;; ;; Narrowing (finding common subtypes)
 (defmulti narrow (fn [context =t1 =t2] [(class =t1) (class =t2)])
-  :hierarchy #'&type/*types-hierarchy*)
+  :hierarchy #'*types-hierarchy*)
 
 ;; (defmethod narrow [AliasType ::&type/real-type] [context ^AliasType =target =by]
 ;;   (if-let [[context =real] (narrow context (.-real =target) =by)]
@@ -154,7 +174,7 @@
 
 ;;         (&type/subsumes? =target (.-type =by))
 ;;         (assert false "(And =target =by)")
-        
+
 ;;         :else
 ;;         [context =target]))
 
@@ -172,7 +192,7 @@
   (Maybe t) => (Or nil t)
   Truthy => (Not Falsey) => (Not (Or nil false))
 
-  (Or nil t) % (Not (Or nil false)) =>> (And t (Not false))
+  (Or nil t) % (Not (Or nil false)) => (And t (Not false)) && t < (Not (Or nil false))
   (Or nil t) < (Or nil false) == false
 
   Long % (Not Number) => Nothing

@@ -23,8 +23,7 @@
   Type
   (realize [type &env]
     (or (get &env name)
-        (throw (ex-info "Unbound type var." {:var name
-                                             :env &env})))))
+        (throw (ex-info "Unbound type var." {:var name, :env &env})))))
 
 (defrecord ClassType [name params]
   Type
@@ -68,7 +67,8 @@
   Any         AnyType
   Nothing     NothingType
   Nil         NilType
-  OpaqueMacro OpaqueMacroType)
+  OpaqueMacro OpaqueMacroType
+  )
 
 (defrecord ClassTypeCtor [class args]
   $TypeFn
@@ -154,7 +154,8 @@
 
 ;; [Functions]
 (do-template [<name> <fn> <super>]
-  (defn <name> [x] (<fn> <super> x))
+  (defn <name> [x]
+    (<fn> <super> x))
 
   type?    satisfies? Type
   type-fn? satisfies? $TypeFn
@@ -192,210 +193,191 @@
 ;; (def Falsey (AliasType. 'alt.typed/Falsey [] (or-type [Nil (LiteralType. false)])))
 ;; (def Truthy (AliasType. 'alt.typed/Truthy [] (not-type Falsey)))
 
-(def ^:dynamic *types-hierarchy*
-  (-> (make-hierarchy)
-      (derive AliasType        ::type)
-      (derive ::real-type      ::type)
-      (derive ::complex-type   ::real-type)
-      (derive NotType          ::complex-type)
-      (derive OrType           ::complex-type)
-      (derive ::simple-type    ::real-type)
-      (derive AnyType          ::simple-type)
-      (derive ::bounded-type   ::simple-type)
-      (derive NothingType      ::bounded-type)
-      (derive ::unit-type      ::bounded-type)
-      (derive NilType          ::unit-type)
-      (derive LiteralType      ::unit-type)
-      (derive ::open-type      ::bounded-type)
-      (derive ClassType        ::open-type)
-      (derive FnType           ::open-type)
-      ))
+;; (defmulti subsumes? (fn [expected actual] [(class expected) (class actual)])
+;;   :default ::default
+;;   :hierarchy #'*types-hierarchy*)
 
-(defmulti subsumes? (fn [expected actual] [(class expected) (class actual)])
-  :default ::default
-  :hierarchy #'*types-hierarchy*)
+;; (defmethod subsumes? [       AnyType ::bounded-type] [expected actual] true)
+;; (defmethod subsumes? [::bounded-type        AnyType] [expected actual] false)
+;; (defmethod subsumes? [       AnyType        AnyType] [expected actual] true)
 
-(defmethod subsumes? [       AnyType ::bounded-type] [expected actual] true)
-(defmethod subsumes? [::bounded-type        AnyType] [expected actual] false)
-(defmethod subsumes? [       AnyType        AnyType] [expected actual] true)
+;; (defmethod subsumes? [::open-type NothingType] [expected actual] true)
+;; (defmethod subsumes? [NothingType ::open-type] [expected actual] false)
+;; (defmethod subsumes? [NothingType NothingType] [expected actual] false)
 
-(defmethod subsumes? [::open-type NothingType] [expected actual] true)
-(defmethod subsumes? [NothingType ::open-type] [expected actual] false)
-(defmethod subsumes? [NothingType NothingType] [expected actual] false)
+;; (defmethod subsumes? [NilType NilType] [expected actual]
+;;   true)
 
-(defmethod subsumes? [NilType NilType] [expected actual]
-  true)
+;; (defmethod subsumes? [LiteralType LiteralType] [expected actual]
+;;   (= expected actual))
 
-(defmethod subsumes? [LiteralType LiteralType] [expected actual]
-  (= expected actual))
+;; (defmethod subsumes? [NotType ::simple-type] [^NotType expected actual]
+;;   (not (subsumes? (.-type expected) actual)))
 
-(defmethod subsumes? [NotType ::simple-type] [^NotType expected actual]
-  (not (subsumes? (.-type expected) actual)))
+;; (defmethod subsumes? [OrType ::simple-type] [^OrType expected actual]
+;;   (boolean (some (&util/partial* subsumes? actual) (.-types expected))))
 
-(defmethod subsumes? [OrType ::simple-type] [^OrType expected actual]
-  (boolean (some (&util/partial* subsumes? actual) (.-types expected))))
+;; (defmethod subsumes? [AliasType ::real-type] [^AliasType expected actual]
+;;   (subsumes? (.-real expected) actual))
 
-(defmethod subsumes? [AliasType ::real-type] [^AliasType expected actual]
-  (subsumes? (.-real expected) actual))
+;; (defmethod subsumes? [::type AliasType] [expected ^AliasType actual]
+;;   (subsumes? expected (.-real actual)))
 
-(defmethod subsumes? [::type AliasType] [expected ^AliasType actual]
-  (subsumes? expected (.-real actual)))
+;; ;; (defmethod subsumes? [::simple-type ::simple-type] [expected actual]
+;; ;;   false)
 
-;; (defmethod subsumes? [::simple-type ::simple-type] [expected actual]
-;;   false)
+;; (defmethod subsumes? [ClassType ClassType] [expected actual]
+;;   (and (= (.-name expected) (.-name actual))
+;;        (every? identity
+;;                (map subsumes? (.-params expected) (.-params actual)))))
 
-(defmethod subsumes? [ClassType ClassType] [expected actual]
-  (and (= (.-name expected) (.-name actual))
-       (every? identity
-               (map subsumes? (.-params expected) (.-params actual)))))
+;; (defmethod subsumes? ::default [expected actual]
+;;   (prn 'subsumes? ::default [(class expected) (class actual)])
+;;   (prn 'subsumes? ::default expected actual)
+;;   ;; (assert false)
+;;   false
+;;   )
 
-(defmethod subsumes? ::default [expected actual]
-  (prn 'subsumes? ::default [(class expected) (class actual)])
-  (prn 'subsumes? ::default expected actual)
-  ;; (assert false)
-  false
-  )
+;; (comment
+;;   (ann while (All [x]
+;;                   [x [x -> Boolean] [x -> x] -> x]))
+;;   (defn while [init test body]
+;;     (if (test init)
+;;       (recur (body init) test body)
+;;       init))
 
-(comment
-  (ann while (All [x]
-                  [x [x -> Boolean] [x -> x] -> x]))
-  (defn while [init test body]
-    (if (test init)
-      (recur (body init) test body)
-      init))
+;;   (defalias Person (Rec [self]
+;;                         {::name    String
+;;                          ::age     Int
+;;                          ::parents {::father (Maybe self)
+;;                                     ::mother (Maybe self)}}))
 
-  (defalias Person (Rec [self]
-                        {::name    String
-                         ::age     Int
-                         ::parents {::father (Maybe self)
-                                    ::mother (Maybe self)}}))
+;;   (defalias Employee {::company     String
+;;                       ::employee-id String
+;;                       & Person})
 
-  (defalias Employee {::company     String
-                      ::employee-id String
-                      & Person})
+;;   (ann-record Person (Rec [self]
+;;                           (Record {::name String
+;;                                    ::age  Int
+;;                                    ::parents '[(Maybe self) (Maybe self)]})))
+;;   (defrecord Person [name age parents])
 
-  (ann-record Person (Rec [self]
-                          (Record {::name String
-                                   ::age  Int
-                                   ::parents '[(Maybe self) (Maybe self)]})))
-  (defrecord Person [name age parents])
+;;   (ann-record Employee (Record {::company String
+;;                                 ::employee-id String
+;;                                 & Person}))
+;;   (defrecord Employee [name age parents company employee-id])
 
-  (ann-record Employee (Record {::company String
-                                ::employee-id String
-                                & Person}))
-  (defrecord Employee [name age parents company employee-id])
+;;   (ann assoc (All [r k v]
+;;                   (Fn [{& r} k v -> {k v & r}]
+;;                       [{k Any & r} k v -> {k v & r}]
+;;                       [(Map k v) k v & (k v) -> (Map k v)])
+;;                   ))
 
-  (ann assoc (All [r k v]
-                  (Fn [{& r} k v -> {k v & r}]
-                      [{k Any & r} k v -> {k v & r}]
-                      [(Map k v) k v & (k v) -> (Map k v)])
-                  ))
+;;   (! nil)
+;;   (| String Number)
+;;   (& Foo Bar)
+;;   (% Object int float boolean)
 
-  (! nil)
-  (| String Number)
-  (& Foo Bar)
-  (% Object int float boolean)
+;;   (ann assoc (All [r k v]
+;;                   (Fn [{& r} k v -> {k v & r}]
+;;                       [{k Any & r} k v -> {k v & r}]
+;;                       [(Map k v) k v & (k v) -> (Map k v)])
+;;                   ))
 
-  (ann assoc (All [r k v]
-                  (Fn [{& r} k v -> {k v & r}]
-                      [{k Any & r} k v -> {k v & r}]
-                      [(Map k v) k v & (k v) -> (Map k v)])
-                  ))
+;;   (ann assoc (All [r k v & (ks vs)]
+;;                   [{& r} k v & ~@(ks vs) -> {k v ~@ks ~@vs & r}]
+;;                   ))
 
-  (ann assoc (All [r k v & (ks vs)]
-                  [{& r} k v & ~@(ks vs) -> {k v ~@ks ~@vs & r}]
-                  ))
+;;   (ann dissoc (All [r k & ks]
+;;                    (Fn[(Record {k Any ~@ks Any & r}) k & ~@ks -> {& r}]
+;;                       [{k Any ~@ks Any & r} k & ~@ks -> {& r}])))
 
-  (ann dissoc (All [r k & ks]
-                   (Fn[(Record {k Any ~@ks Any & r}) k & ~@ks -> {& r}]
-                      [{k Any ~@ks Any & r} k & ~@ks -> {& r}])))
-
-  (ann map (All [ret l & ls]
-                [[l ~@ls -> ret] l ~@(Seq ls) -> (List ret)]))
+;;   (ann map (All [ret l & ls]
+;;                 [[l ~@ls -> ret] l ~@(Seq ls) -> (List ret)]))
 
   
   
-  (def person {::name "Eduardo"
-               ::$say-hello (fn [o hello] (str hello " " (::name o)))})
+;;   (def person {::name "Eduardo"
+;;                ::$say-hello (fn [o hello] (str hello " " (::name o)))})
 
-  (defalias Person
-    (Rec [self]
-         {::name String
-          ::$say-hello [self String -> String]}))
+;;   (defalias Person
+;;     (Rec [self]
+;;          {::name String
+;;           ::$say-hello [self String -> String]}))
 
-  ((::$say-hello person) person)
+;;   ((::$say-hello person) person)
 
-  (ann call (All [ret r msg & args]
-                 (Fn [(Rec [full-obj]
-                           {msg [full-obj ~@args -> ret] & r})
-                      msg
-                      ~@args
-                      ret])))
-  (defn call [object message-type & params]
-    ((message-type object) object params))
+;;   (ann call (All [ret r msg & args]
+;;                  (Fn [(Rec [full-obj]
+;;                            {msg [full-obj ~@args -> ret] & r})
+;;                       msg
+;;                       ~@args
+;;                       ret])))
+;;   (defn call [object message-type & params]
+;;     ((message-type object) object params))
 
-  (call person ::$say-hello "Hola")
+;;   (call person ::$say-hello "Hola")
 
-  (ann apply (All [ret args]
-                  [[~@args -> ret] ~@args -> ret]))
-  (apply + '(1 2 3 4 5))
+;;   (ann apply (All [ret args]
+;;                   [[~@args -> ret] ~@args -> ret]))
+;;   (apply + '(1 2 3 4 5))
 
-  '[Integer Integer & Integer]
+;;   '[Integer Integer & Integer]
 
-  (ann + (All [[n < (Xor AnyInteger AnyFloat Number)]]
-              (Fn [-> 0]
-                  [n -> n]
-                  [& n -> n])))
+;;   (ann + (All [[n < (Xor AnyInteger AnyFloat Number)]]
+;;               (Fn [-> 0]
+;;                   [n -> n]
+;;                   [& n -> n])))
 
-  x < (Or Long Double) => Number
+;;   x < (Or Long Double) => Number
 
-  (ann assoc (All [k v]
-                  (Let [[r < {}]
-                        [m < (Xor {k Any & r} {& r})]]
-                       (Fn [m k v -> {k v & r}]
-                           [(Map k v) k v -> (Map k v)]))
-                  ))
+;;   (ann assoc (All [k v]
+;;                   (Let [[r < {}]
+;;                         [m < (Xor {k Any & r} {& r})]]
+;;                        (Fn [m k v -> {k v & r}]
+;;                            [(Map k v) k v -> (Map k v)]))
+;;                   ))
 
-  (ann assoc (All [k v]
-                  (Let [[r < {}]
-                        [m < (Xor (Record {k Any & r}) {(? k) Any & r})]]
-                       (Fn [m k v -> {k v & r}]
-                           [(Map k v) k v -> (Map k v)]))
-                  ))
+;;   (ann assoc (All [k v]
+;;                   (Let [[r < {}]
+;;                         [m < (Xor (Record {k Any & r}) {(? k) Any & r})]]
+;;                        (Fn [m k v -> {k v & r}]
+;;                            [(Map k v) k v -> (Map k v)]))
+;;                   ))
 
-  (-> {:a 1}
-      (with-meta {::type :record})
-      (assoc :b 2)
-      (merge {:c 3})
-      meta)
+;;   (-> {:a 1}
+;;       (with-meta {::type :record})
+;;       (assoc :b 2)
+;;       (merge {:c 3})
+;;       meta)
 
-  (ann number? (Fn [Number       -> true]
-                   [(Not Number) -> false]))
+;;   (ann number? (Fn [Number       -> true]
+;;                    [(Not Number) -> false]))
 
-  (ann number [Any -> Boolean :filters {:then (is 0 Number),
-                                        :else (! 0 Number)}])
+;;   (ann number [Any -> Boolean :filters {:then (is 0 Number),
+;;                                         :else (! 0 Number)}])
 
-  (ann assoc (All [r k v]
-                  (Fn [{(? k) Any & r} k v -> {k v & r}]
-                      [(Record {k v & r}) k v -> {k v & r}]
-                      [(Map k v) k v -> (Map k v)])
-                  ))
+;;   (ann assoc (All [r k v]
+;;                   (Fn [{(? k) Any & r} k v -> {k v & r}]
+;;                       [(Record {k v & r}) k v -> {k v & r}]
+;;                       [(Map k v) k v -> (Map k v)])
+;;                   ))
 
-  (let* [vec__2910 p__2905
-         x (nth vec__2910 0 nil)
-         y (nth vec__2910 1 nil)
-         zs (nthnext vec__2910 2)]
-        [x y zs])
+;;   (let* [vec__2910 p__2905
+;;          x (nth vec__2910 0 nil)
+;;          y (nth vec__2910 1 nil)
+;;          zs (nthnext vec__2910 2)]
+;;         [x y zs])
 
-  ((fn [& [x y & zs]] `[~x ~y ~@zs])
-   1 2 3 4 5)
-  =>
-  [1 2 3 4 5]
+;;   ((fn [& [x y & zs]] `[~x ~y ~@zs])
+;;    1 2 3 4 5)
+;;   =>
+;;   [1 2 3 4 5]
 
-  (All [& ts]
-       [[~@ts -> '[~@ts]]])
+;;   (All [& ts]
+;;        [[~@ts -> '[~@ts]]])
 
-  (Rec [elem]
-       '[Keyword (? (Map Keyword Any)) (* elem)])
+;;   (Rec [elem]
+;;        '[Keyword (? (Map Keyword Any)) (* elem)])
 
-  )
+;;   )
