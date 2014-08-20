@@ -1,7 +1,7 @@
 (ns alt.typed.solver
   (:require (alt.typed [type :as &type]
                        [translator :as &translator])
-            (alt.typed.context [graph :as &graph]))
+            (alt.typed.context [store :as &store]))
   (:import (alt.typed.type LiteralType
                            ClassType
                            FnType
@@ -34,85 +34,85 @@
       ))
 
 ;; [Functions]
-(defmulti solve (fn [graph expected actual] [(class expected) (class actual)])
+(defmulti solve (fn [store expected actual] [(class expected) (class actual)])
   :hierarchy #'*types-hierarchy*)
 
-;; (defmethod solve [::&type/type AliasType] [graph =expected ^AliasType =actual]
+;; (defmethod solve [::&type/type AliasType] [store =expected ^AliasType =actual]
 ;;   (prn 'solve [::&type/type AliasType])
-;;   (solve graph =expected (.-real =actual)))
+;;   (solve store =expected (.-real =actual)))
 
-;; (defmethod solve [AnyType ::&type/type] [graph =expected =actual]
+;; (defmethod solve [AnyType ::&type/type] [store =expected =actual]
 ;;   (prn 'solve '[AnyType ::&type/type])
-;;   graph)
+;;   store)
 
-;; (defmethod solve [NilType NilType] [graph =expected =actual]
+;; (defmethod solve [NilType NilType] [store =expected =actual]
 ;;   (prn 'solve [NilType NilType])
-;;   graph)
+;;   store)
 
-;; (defmethod solve [::&type/bounded-type NilType] [graph =expected =actual]
+;; (defmethod solve [::&type/bounded-type NilType] [store =expected =actual]
 ;;   (prn 'solve [::&type/bounded-type NilType])
 ;;   nil)
 
-;; (defmethod solve [NotType ::&type/bounded-type] [graph =expected =actual]
+;; (defmethod solve [NotType ::&type/bounded-type] [store =expected =actual]
 ;;   (prn 'solve '[NotType ::&type/bounded-type])
 ;;   (if (not (&type/subsumes? (.-type =expected) =actual))
-;;     graph))
+;;     store))
 
-;; (defmethod solve [::&type/type NothingType] [graph =expected =actual]
+;; (defmethod solve [::&type/type NothingType] [store =expected =actual]
 ;;   (prn 'solve '[::&type/type NothingType])
-;;   graph)
+;;   store)
 
-;; (defmethod solve [TypeVar TypeVar] [graph ^TypeVar $expected ^TypeVar $actual]
+;; (defmethod solve [TypeVar TypeVar] [store ^TypeVar $expected ^TypeVar $actual]
 ;;   (prn 'solve [TypeVar TypeVar])
 ;;   (let [_ (prn 'solve '[TypeVar TypeVar] [(.-id $actual) (.-id $expected)])
-;;         =actual (&graph/get-var graph (.-id $actual))
-;;         =expected (&graph/get-var graph (.-id $expected))]
-;;     (if-let [graph (solve graph =actual =expected)]
-;;       (&graph/constrain graph (.-id $expected) (&graph/get-var graph (.-id $actual))))))
+;;         =actual (&store/get-var store (.-id $actual))
+;;         =expected (&store/get-var store (.-id $expected))]
+;;     (if-let [store (solve store =actual =expected)]
+;;       (&store/constrain store (.-id $expected) (&store/get-var store (.-id $actual))))))
 
-;; (defmethod solve [::&type/bounded-type TypeVar] [graph =expected ^TypeVar $actual]
+;; (defmethod solve [::&type/bounded-type TypeVar] [store =expected ^TypeVar $actual]
 ;;   (prn 'solve '[ClassType TypeVar] [(class =expected) (class $actual)])
-;;   (let [=actual (&graph/get-var graph (.-id $actual))
+;;   (let [=actual (&store/get-var store (.-id $actual))
 ;;         _ (prn 'solve '[ClassType TypeVar] '=actual (class =actual))]
-;;     (if-let [graph (solve graph =actual =expected)]
-;;       (&graph/constrain graph (.-id $actual) =expected))))
+;;     (if-let [store (solve store =actual =expected)]
+;;       (&store/constrain store (.-id $actual) =expected))))
 
-;; (defmethod solve [NotType TypeVar] [graph =expected ^TypeVar $actual]
-;;   (if (not (&type/subsumes? (.-type =expected) (&graph/get-var graph (.-id $actual))))
-;;     (&graph/constrain graph (.-id $actual) =expected)))
+;; (defmethod solve [NotType TypeVar] [store =expected ^TypeVar $actual]
+;;   (if (not (&type/subsumes? (.-type =expected) (&store/get-var store (.-id $actual))))
+;;     (&store/constrain store (.-id $actual) =expected)))
 
-;; (defmethod solve [::&type/type OrType] [graph =expected ^OrType =actual]
+;; (defmethod solve [::&type/type OrType] [store =expected ^OrType =actual]
 ;;   (prn 'solve [::&type/type OrType])
 ;;   (reduce (fn [g =t]
 ;;             (if g (solve g =expected =t)))
-;;           graph
+;;           store
 ;;           (.-types =actual)))
 
-;; (defmethod solve [::&type/bounded-type ::&type/bounded-type] [graph =expected =actual]
+;; (defmethod solve [::&type/bounded-type ::&type/bounded-type] [store =expected =actual]
 ;;   (prn 'solve [::&type/bounded-type ::&type/bounded-type])
 ;;   (if (&type/subsumes? =expected =actual)
-;;     graph))
+;;     store))
 
-;; (defmethod solve [AliasType TypeVar] [graph ^AliasType =expected $$actual]
+;; (defmethod solve [AliasType TypeVar] [store ^AliasType =expected $$actual]
 ;;   (prn 'solve '[AliasType TypeVar])
-;;   (solve graph (.-real =expected) $$actual))
+;;   (solve store (.-real =expected) $$actual))
 
-;; (defmethod solve [AliasType AliasType] [graph ^AliasType =expected ^AliasType =actal]
+;; (defmethod solve [AliasType AliasType] [store ^AliasType =expected ^AliasType =actal]
 ;;   (prn 'solve [AliasType AliasType])
-;;   (solve graph (.-real =expected) (.-real =actal)))
+;;   (solve store (.-real =expected) (.-real =actal)))
 
-(defn solve-all [graph =expected =actual]
+(defn solve-all [store =expected =actual]
   (reduce (fn [g [e a]]
             (if g
               (if-let [outcome (do (prn 'solve
-                                        (class e) (&translator/translate e graph)
-                                        (class a) (&translator/translate a graph))
+                                        (class e) (&translator/translate e store)
+                                        (class a) (&translator/translate a store))
                                  (solve g e a))]
                 outcome
-                (do (println "Couldn't solve:" [(&translator/translate e graph)
-                                                (&translator/translate a graph)])
+                (do (println "Couldn't solve:" [(&translator/translate e store)
+                                                (&translator/translate a store)])
                   nil))))
-          graph
+          store
           (map vector =expected =actual)))
 
 ;; TODO: Rewrite 'narrow to simplify it.
@@ -143,9 +143,9 @@
 ;;       [context (&type/or-type =parts)])))
 
 ;; (defmethod narrow [TypeVar NotType] [context ^TypeVar $target ^NotType =by]
-;;   (if (&type/subsumes? (.-type =by) (&graph/get-var context (.-id $target)))
+;;   (if (&type/subsumes? (.-type =by) (&store/get-var context (.-id $target)))
 ;;     nil
-;;     [(&graph/constrain context (.-id $target) =by) $target]))
+;;     [(&store/constrain context (.-id $target) =by) $target]))
 
 ;; (defmethod narrow [OrType OrType] [context ^OrType =target ^OrType =by]
 ;;   (prn '[OrType OrType] '=target (&translator/translate =target context) =target)
@@ -179,7 +179,7 @@
 ;;         [context =target]))
 
 ;; (defmethod narrow [TypeVar ::&type/bounded-type] [context ^TypeVar $target =by]
-;;   (if (&type/subsumes? =by (&graph/get-var context (.-id $target)))
+;;   (if (&type/subsumes? =by (&store/get-var context (.-id $target)))
 ;;     [context $target]
 ;;     nil))
 

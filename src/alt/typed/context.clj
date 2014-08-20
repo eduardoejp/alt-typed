@@ -3,7 +3,8 @@
   (:require (clojure [set :as set])
             (alt.typed.context [ns :as &&ns]
                                [library :as &&library]
-                               [graph :as &&graph])))
+                               [store :as &&store]
+                               [env :as &&env])))
 
 ;; [Protocols]
 (defprotocol $Context
@@ -48,5 +49,6 @@
 ;; [Constants]
 (def +new-context+
   (-> (Context. nil {})
-      &&graph/install
+      &&store/install
+      &&env/install
       &&library/install))

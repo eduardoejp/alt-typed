@@ -4,7 +4,7 @@
                        [translator :as &translator])
             (alt.typed.context [ns :as &ns]
                                [library :as &library]
-                               [graph :as &graph])
+                               [env :as &env])
             (alt.typed.syntax [parser :as &parser]
                               [interpreter :as &interpreter]))
   (:import (alt.typed.type TypeOp
@@ -26,14 +26,14 @@
         &context (&ns/intern &context var-name)
         full-var-name (&ns/resolve &context var-name)]
     ;; (prn 'full-var-name full-var-name)
-    (&graph/ann &context full-var-name =var)))
+    (&env/ann &context full-var-name =var)))
 
 (defn ann-macro* [&context var-name]
   {:pre [(and (symbol? var-name)
               (not (namespace var-name)))]}
   (let [&context (&ns/intern &context var-name)
         full-var-name (&ns/resolve &context var-name)]
-    (&graph/ann &context full-var-name &type/OpaqueMacro)))
+    (&env/ann &context full-var-name &type/OpaqueMacro)))
 
 (defn ann-class* [context class-ctor supers]
   {:pre [(vector? supers)]}

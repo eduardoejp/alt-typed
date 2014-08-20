@@ -7,7 +7,8 @@
                        [solver :as &solver])
             (alt.typed.context [ns :as &ns]
                                [library :as &library]
-                               [graph :as &graph])
+                               [store :as &store]
+                               [env :as &env])
             (alt.typed.syntax [parser :as &parser]
                               [interpreter :as &interpreter]))
   (:import (alt.typed.type LiteralType
@@ -82,62 +83,61 @@
     {:fn-name ?name
      :arities arities}))
 
-(defn ^:private analyse-all [context [e & exprs]]
-  (for [[context $e] (analyse context e)
-        [context $es] (if (empty? exprs)
-                        (list [context '()])
-                        (analyse-all context exprs))]
-    [context (cons $e $es)]))
+(defn ^:private analyse-all [context [%e & exprs]]
+  (for [[context =e] (analyse context %e)
+        [context =exprs] (if (empty? exprs)
+                           (list [context '()])
+                           (analyse-all context exprs))]
+    [context (cons =e =exprs)]))
 
 (defn ^:private add-tuple [context tuple]
   {:pre [(and (vector? tuple)
               (not (empty? tuple))
               (every? symbol? tuple)
               (every? (partial not= '&) tuple))]}
-  (let [tuple-length (count tuple)
-        [context $members] (reduce (fn [[c $vs] v]
-                                     (let [[c $v] (&graph/add-var c v &type/Any)]
+  (let [[context $members] (reduce (fn [[c $vs] v]
+                                     (let [[c $v] (&store/store c v &type/Any)]
                                        [c (conj $vs $v)]))
                                    [context []]
                                    tuple)
-        =members (mapv (partial &graph/get-var context) $members)
-        [context $tuple] (&graph/add-var context (gensym "tuple_") (TupleType. =members))
-        frame (into (hash-map) (map vector tuple $members))]
-    [context frame $tuple]))
+        frame (into (hash-map) (map vector tuple $members))
+        =tuple (TupleType. (mapv (partial &store/retrieve context) $members))]
+    [context frame =tuple]))
 
-(defn ^:private init-frame [context args]
-  (reduce (fn [[context frame $args] arg]
-            (cond (symbol? arg)
-                  (let [[context $arg] (&graph/add-var context arg &type/Any)]
-                    [context (assoc frame arg $arg) (conj $args $arg)])
+(let [initializer (fn [[context frame arg-lists] arg]
+                    (cond (symbol? arg)
+                          (let [[context $arg] (&store/store context arg &type/Any)]
+                            [context (assoc frame arg $arg) (conj arg-lists $arg)])
 
-                  (vector? arg)
-                  (let [[context tuple-frame $tuple] (add-tuple context arg)]
-                    [context (merge frame tuple-frame) (conj $args $tuple)])
-
-                  :else
-                  (throw (ex-info "Unrecognized arg form." {:form arg, :args args}))))
-          [context {} []]
-          args))
+                          (vector? arg)
+                          (let [[context tuple-frame =tuple] (add-tuple context arg)]
+                            [context (merge frame tuple-frame) (conj arg-lists =tuple)])
+                          
+                          :else
+                          (assert false)))
+      tester (some-fn symbol? vector?)]
+  (defn ^:private init-fn-args [context args]
+    (assert (every? tester args) "All args must be either symbols or destructuring forms.")
+    (reduce initializer [context {} []] args)))
 
 (defn ^:private analyse-arity [context =fn [frame & body :as form]]
   (prn 'analyse ::arity (keys frame) body)
   ;; (prn 'analyse ::arity %args 'PRE
-  ;;      (get-in context [:_graph :_local])
-  ;;      (get-in context [:_graph :_global]))
+  ;;      (get-in context [:_store :_local])
+  ;;      (get-in context [:_store :_global]))
   (let [[invariants-map body] (if (map? (first body))
                                 [(first body) (rest body)]
                                 [nil body])]
     (assert (nil? invariants-map) "Can't handle invariants ({:pre ... :post ...}) yet!")
     (let [;; [context =args frame] (init-args context %args)
-          context (&graph/push context frame)
+          context (&env/push context frame)
           ;; _ (prn 'analyse ::arity %args 'POST
-          ;;        (get-in context [:_graph :_local])
-          ;;        (get-in context [:_graph :_global]))
+          ;;        (get-in context [:_store :_local])
+          ;;        (get-in context [:_store :_global]))
           ]
-      (for [[context $body] (analyse context `(do ~@body))
-            :let [context (&graph/pop context)]]
-        [context $body]))))
+      (for [[context =body] (analyse context `(do ~@body))
+            :let [context (&env/pop context)]]
+        [context =body]))))
 
 (defn ^:private analyse-arities [context =fn [arity & arities]]
   (for [[context =arity] (analyse-arity context =fn arity)
@@ -146,15 +146,15 @@
                              (analyse-arities context =fn arities))]
     [context (cons =arity =arities)]))
 
-(defn ^:private analyse-let [context [[left right] & bindings] do-body]
-  (for [[context $right] (analyse context right)
-        :let [context (&graph/push context {left $right})]
-        [context $remaining] (if (empty? bindings)
+(defn ^:private analyse-let [context [[left %right] & bindings] do-body]
+  (for [[context =right] (analyse context %right)
+        :let [context (&env/push context {left =right})]
+        [context =remaining] (if (empty? bindings)
                                (analyse context do-body)
                                (analyse-let context bindings do-body))
         :let [_ (prn 'analyse-let/context (empty? bindings) do-body)
-              context (&graph/pop context)]]
-    [context $remaining]))
+              context (&env/pop context)]]
+    [context =remaining]))
 
 (defn ^:private fn-call [context ^FnType =fn =args]
   (let [num-args (count =args)
@@ -169,7 +169,7 @@
              [context =return])))))
 
 (defn ^:private min-fn-type [context =args]
-  (let [[context =return] (&graph/add-var context (gensym "return_") &type/Any)
+  (let [[context =return] (&store/store context (gensym "return_") &type/Any)
         =arity (&type/arity-type (vec =args) =return)]
     [context (&type/fn-type [=arity])]))
 
@@ -215,18 +215,14 @@
 
 (defmethod analyse ::symbol [context form]
   (prn 'analyse ::symbol form)
-  (if-let [$form (or (&graph/find context form)
+  (if-let [=form (or (&env/find context form)
                      (if-let [resolved (&ns/resolve context form)]
-                       (&graph/find context resolved)))]
-    (if (&graph/id? $form)
-      (do (prn 'analyse ::symbol '$form (&translator/translate (&graph/get-type context $form) context))
-        (list [context $form]))
-      (let [[context $form] (if (&type/type-fn? $form)
-                              (let [[context =form] (&graph/instance context $form)]
-                                (&graph/add-type context =form))
-                              (&graph/add-type context $form))]
-        (prn 'analyse ::symbol '$form (&translator/translate (&graph/get-type context $form) context))
-        (list [context $form])))
+                       (&env/find context resolved)))]
+    (let [[context =form] (if (&type/type-fn? =form)
+                            (&store/instance context =form)
+                            [context =form])]
+      (prn 'analyse ::symbol '=form (&translator/translate =form context))
+      (list [context =form]))
     (throw (ex-info "Unrecognized symbol." {:symbol form}))))
 
 (defmethod analyse 'def [context [_ var-name & extra :as form]]
@@ -249,31 +245,31 @@
                    (analyse context (first exprs))
 
                    ;; Else
-                   (for [[context $exprs] (analyse-all context exprs)]
-                     [context (last $exprs)]))]
+                   (for [[context =exprs] (analyse-all context exprs)]
+                     [context (last =exprs)]))]
     (prn 'analyse/do (count exprs) (count outcomes) (mapv class outcomes) form)
     outcomes))
 
 (defmethod analyse 'if [context [_ %test %then %else :as form]]
   (prn 'analyse 'if form)
-  (let [branches (doall (for [[context $test] (let [universes (analyse context %test)]
+  (let [branches (doall (for [[context =test] (let [universes (analyse context %test)]
                                                 (when (> (count universes) 1)
                                                   (prn 'if/universe (count universes)))
                                                 universes)
-                              :let [_ (prn 'if/test (&translator/translate $test context))]
-                              [context $branch] (concat (if-let [[then-context $test] (&solver/narrow context $test (&library/lookup context 'alt.typed/Truthy))]
-                                                          (do (println "THEN:" (&translator/translate $test context))
+                              :let [_ (prn 'if/test (&translator/translate =test context))]
+                              [context =branch] (concat (if-let [[then-context =test] (&solver/narrow context =test (&library/lookup context 'alt.typed/Truthy))]
+                                                          (do (println "THEN:" (&translator/translate =test context))
                                                             (let [then-context (if (and (symbol? %test) (nil? (namespace %test)))
-                                                                                 (&graph/push then-context {%test $test})
+                                                                                 (&env/push then-context {%test =test})
                                                                                  then-context)]
                                                               (analyse then-context %then))))
-                                                        (if-let [[else-context $test] (&solver/narrow context $test (&library/lookup context 'alt.typed/Falsey))]
-                                                          (do (println "ELSE:" (&translator/translate $test context))
+                                                        (if-let [[else-context =test] (&solver/narrow context =test (&library/lookup context 'alt.typed/Falsey))]
+                                                          (do (println "ELSE:" (&translator/translate =test context))
                                                             (let [else-context (if (and (symbol? %test) (nil? (namespace %test)))
-                                                                                 (&graph/push else-context {%test $test})
+                                                                                 (&env/push else-context {%test =test})
                                                                                  else-context)]
                                                               (analyse else-context %else)))))]
-                          [context $branch]))]
+                          [context =branch]))]
     (prn 'analyse/if (count branches) (mapv class branches) form)
     branches))
 
@@ -282,34 +278,31 @@
   (assert (even? (count bindings)) "Let must have an even number of bindings.")
   (analyse-let context (partition 2 bindings) `(do ~@body)))
 
-(defmethod analyse 'clojure.core/fn [context form]
-  (prn 'analyse 'clojure.core/fn form)
-  (let [{:keys [fn-name arities]} (normalize-fn form)
-        [context packs] (reduce (fn [[context packs] arity]
-                                  (let [[context frame $args] (init-frame context (first arity))]
-                                    [context (conj packs [frame $args])]))
-                                [context []]
-                                arities)
-        [context =arities] (reduce (fn [[context =arities] [_ $args]]
-                                     (let [[context $var] (&graph/add-var context (gensym "return_") &type/Any)]
-                                       [context (conj =arities (&type/arity-type (mapv (partial &graph/get-type context) $args)
-                                                                                 (&graph/get-type context $var)))]))
-                                   [context []]
-                                   packs)
-        =fn (&type/fn-type =arities)
-        context (if fn-name
-                  (let [context (&graph/push context {fn-name =fn})]
-                    (prn "Function has a name:" fn-name)
-                    (prn (&graph/find context fn-name))
+(let [arg-initializer (fn [[context packs] arity]
+                        (let [[context frame =args] (init-fn-args context (first arity))]
+                          [context (conj packs [frame =args])]))
+      arity-initializer (fn [[context =arities] [_ =args]]
+                          (let [[context =var] (&store/store context (gensym "return_") &type/Any)]
+                            [context (conj =arities (&type/arity-type =args =var))]))]
+  (defmethod analyse 'clojure.core/fn [context form]
+    (prn 'analyse 'clojure.core/fn form)
+    (let [{:keys [fn-name arities]} (normalize-fn form)
+          [context packs] (reduce arg-initializer [context []] arities)
+          [context =arities] (reduce arity-initializer [context []] packs)
+          =fn (&type/fn-type =arities)
+          context (if fn-name
+                    (let [context (&env/push context {fn-name =fn})]
+                      (prn "Function has a name:" fn-name)
+                      (prn (&env/find context fn-name))
+                      context)
                     context)
-                  context)
-        arities (for [[[frame] [_ & body]] (map vector packs arities)]
-                  (conj body frame))
-        universes (doall (for [[context =return] (analyse-arities context =fn arities)
-                               :let [context (if fn-name (&graph/pop context) context)]]
-                           [context =return]))]
-    (prn 'analyse/fn (count universes))
-    (assert false)))
+          arities (for [[[frame] [_ & body]] (map vector packs arities)]
+                    (conj body frame))
+          universes (doall (for [[context =return] (analyse-arities context =fn arities)
+                                 :let [context (if fn-name (&env/pop context) context)]]
+                             [context =return]))]
+      (prn 'analyse/fn (count universes))
+      (assert false))))
 
 (defmethod analyse 'clojure.core/defn [context [_ fn-name & body :as form]]
   (prn 'analyse 'clojure.core/defn form)
@@ -373,26 +366,28 @@
 
 (defmethod analyse ::fn-call [context [%fn & %args :as form]]
   (prn 'analyse ::fn-call form)
-  (or (seq (for [[context $fn-inst] (analyse context %fn)
-                 [context $args] (analyse-all context %args)
+  (or (seq (for [[context =fn] (analyse context %fn)
+                 [context =args] (analyse-all context %args)
                  :let [_ (do (prn '%fn form)
-                           (prn '$fn-inst (&translator/translate $fn-inst context))
-                           (prn '$args (mapv (&util/partial* &translator/translate context) $args)))
-                       _ (prn '$fn-inst (&translator/translate $fn-inst context))
-                       =fn-inst (&graph/get-var context $fn-inst)
-                       [context $fn-inst] (cond (&type/fn? =fn-inst)
-                                                [context $fn-inst]
+                           (prn '=fn (&translator/translate =fn context))
+                           (prn '=args (mapv (&util/partial* &translator/translate context) =args)))
+                       [context =fn] (cond (&type/fn? =fn)
+                                           [context =fn]
 
-                                                (instance? TypeVar =fn-inst)
-                                                (let [[context =min-fn] (min-fn-type context (mapv (partial &graph/get-var context) $args))]
-                                                  (if-let [context (&solver/solve context (&graph/get-var context (.-id =fn-inst)) =min-fn)]
-                                                    [context $fn-inst]
-                                                    (assert false)))
+                                           (and (instance? TypeVar =fn)
+                                                (&type/fn? (&store/retrieve context (.-id ^TypeVar =fn))))
+                                           (let [[context =min-fn] (min-fn-type context =args)
+                                                 ==fn (&store/retrieve context (.-id ^TypeVar =fn))]
+                                             (if-let [context (&solver/solve context ==fn =min-fn)]
+                                               [context =fn]
+                                               (throw (ex-info "Function can't be applied to args." {:form form
+                                                                                                     :args (vec %args)
+                                                                                                     :expected =min-fn
+                                                                                                     :actual ==fn}))))
 
-                                                :else
-                                                (assert (&type/fn? =fn-inst) "Must call a Fn type."))]
-                 [context $return] (fn-call context =fn-inst $args)]
-             [context $return]))
+                                           :else
+                                           (assert false "Must call a Fn type."))]]
+             (fn-call context =fn =args)))
       (throw (ex-info "Function can't be applied to args." {:form form, :fn %fn, :args (vec %args)}))))
 
 (defmethod analyse ::macro [context form]
@@ -415,9 +410,9 @@
           (let [impl (get-method analyse resolved-sym)]
             (if (not= impl (get-method analyse ::default))
               (impl context form)
-              (if-let [$type (&graph/find context resolved-sym)]
-                (do (prn 'default/$type (&translator/translate $type context))
-                  (cond (&type/macro? $type)
+              (if-let [=type (&env/find context resolved-sym)]
+                (do (prn 'default/=type (&translator/translate =type context))
+                  (cond (&type/macro? =type)
                         ((get-method analyse ::macro) context form)
 
                         :else

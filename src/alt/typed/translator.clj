@@ -3,7 +3,7 @@
                        [type :as &type]
                        [context :as &context])
             (alt.typed.context [ns :as &ns]
-                               [graph :as &graph]))
+                               [store :as &store]))
   (:import (alt.typed.type LiteralType
                            EnvLookup
                            ClassType
@@ -122,5 +122,5 @@
 
   TypeVar
   (translate [^TypeVar self &context]
-    (symbol (str "⟨" (.-name self) ":" (translate (&graph/get-var &context (.-id self)) &context) "⟩")))
+    (symbol (str "⟨" (.-name self) ":" (translate (&store/retrieve &context self) &context) "⟩")))
   )
