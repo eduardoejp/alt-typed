@@ -60,7 +60,7 @@
     (some (&util/partial* get binding-name) (::local self))))
 
 (defn push [self frame]
-  (assert (every? (comp not namespace) (keys frame)) "The local environment is for local (unqualified) vars.")
+  (assert (not (some namespace (keys frame))) "The local environment is for local (unqualified) vars.")
   (update-in self [::local] conj frame))
 
 (defn pop [self]

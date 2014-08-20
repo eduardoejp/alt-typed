@@ -385,10 +385,8 @@
 
                                                 (instance? TypeVar =fn-inst)
                                                 (let [[context =min-fn] (min-fn-type context (mapv (partial &graph/get-var context) $args))]
-                                                  (if (&type/subsumes? (&graph/get-var context (.-id =fn-inst)) =min-fn)
-                                                    (let [$min-fn (&graph/add-type context =min-fn)]
-                                                      [(&graph/constrain context (.-id =fn-inst) =min-fn)
-                                                       $min-fn])
+                                                  (if-let [context (&solver/solve context (&graph/get-var context (.-id =fn-inst)) =min-fn)]
+                                                    [context $fn-inst]
                                                     (assert false)))
 
                                                 :else
