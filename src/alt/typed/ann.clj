@@ -8,7 +8,7 @@
             (alt.typed.syntax [parser :as &parser]
                               [interpreter :as &interpreter]))
   (:import (alt.typed.type TypeOp
-                           AliasType
+                           TypeAlias
                            ClassType
                            ClassTypeCtor
                            TypeCtor)))
@@ -79,7 +79,7 @@
                        (let [type-expr (if-let [parsed-def (&parser/parse type-def context)]
                                          (&interpreter/eval parsed-def context)
                                          (throw (ex-info "Type definition can't be parsed." {:def type-def})))]
-                         (AliasType. ctor [] type-expr))
+                         (TypeAlias. ctor [] type-expr))
                        (let [uq-type-ctor (if-let [parsed-def (&parser/parse `(~'alt.typed/All ~t-args ~type-def) context)]
                                             (&interpreter/eval parsed-def context)
                                             (throw (ex-info "Type definition can't be parsed." {:def type-def})))]

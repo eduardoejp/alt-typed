@@ -7,7 +7,7 @@
   (:import (alt.typed.type LiteralType
                            EnvLookup
                            ClassType
-                           AliasType
+                           TypeAlias
                            ArityType
                            FnType
                            TupleType
@@ -63,9 +63,9 @@
             (map (&util/partial* translate &context) params))
       (nickname-symbol (.-name self) &context)))
 
-  AliasType
+  TypeAlias
   (translate [self &context]
-    ;; (prn 'AliasType/translate (.-ctor self))
+    ;; (prn 'TypeAlias/translate (.-ctor self))
     (if-let [params (seq (.-args self))]
       (cons (nickname-symbol (.-ctor self) &context)
             (map (&util/partial* translate &context) params))

@@ -15,7 +15,7 @@
                            TupleType
                            ArityType
                            FnType
-                           AliasType
+                           TypeAlias
                            TypeVar)))
 
 (declare analyse)
@@ -148,7 +148,8 @@
 
 (defn ^:private analyse-let [context [[left %right] & bindings] do-body]
   (for [[context =right] (analyse context %right)
-        :let [context (&env/push context {left =right})]
+        :let [_ (prn 'analyse-let %right '=> =right)
+              context (&env/push context {left =right})]
         [context =remaining] (if (empty? bindings)
                                (analyse context do-body)
                                (analyse-let context bindings do-body))
@@ -161,7 +162,8 @@
         all-arities (.-arities =fn)
         applicable-arities (filter #(= num-args (count (.-normal-args ^ArityType %))) all-arities)]
     (seq (for [^ArityType =arity applicable-arities
-               :let [context (&solver/solve-all context (.-normal-args =arity) =args)]
+               :let [_ (println "PRE-solving:" (&translator/translate =arity context))
+                     context (&solver/solve-all context (.-normal-args =arity) =args)]
                :when context
                :let [=return (.-return =arity)]]
            (do (println "POST-solving:" (&translator/translate =arity context))
@@ -254,21 +256,23 @@
   (prn 'analyse 'if form)
   (let [branches (doall (for [[context =test] (let [universes (analyse context %test)]
                                                 (when (> (count universes) 1)
-                                                  (prn 'if/universe (count universes)))
+                                                  (prn 'if/universes (count universes)))
                                                 universes)
                               :let [_ (prn 'if/test (&translator/translate =test context))]
-                              [context =branch] (concat (if-let [[then-context =test] (&solver/narrow context =test (&library/lookup context 'alt.typed/Truthy))]
-                                                          (do (println "THEN:" (&translator/translate =test context))
-                                                            (let [then-context (if (and (symbol? %test) (nil? (namespace %test)))
-                                                                                 (&env/push then-context {%test =test})
-                                                                                 then-context)]
-                                                              (analyse then-context %then))))
-                                                        (if-let [[else-context =test] (&solver/narrow context =test (&library/lookup context 'alt.typed/Falsey))]
-                                                          (do (println "ELSE:" (&translator/translate =test context))
-                                                            (let [else-context (if (and (symbol? %test) (nil? (namespace %test)))
-                                                                                 (&env/push else-context {%test =test})
-                                                                                 else-context)]
-                                                              (analyse else-context %else)))))]
+                              [context =branch] (concat (if-let [[context =test] (&solver/narrow context =test true)]
+                                                          (do (prn 'if/test.then (&translator/translate =test context))
+                                                            (let [context (if (and (symbol? %test) (nil? (namespace %test)))
+                                                                            (&env/push context {%test =test})
+                                                                            context)]
+                                                              (for [[context =then] (analyse context %then)]
+                                                                [(&env/pop context) =then]))))
+                                                        (if-let [[context =test] (&solver/narrow context =test false)]
+                                                          (do (prn 'if/test.else (&translator/translate =test context))
+                                                            (let [context (if (and (symbol? %test) (nil? (namespace %test)))
+                                                                            (&env/push context {%test =test})
+                                                                            context)]
+                                                              (for [[context =else] (analyse context %else)]
+                                                                [(&env/pop context) =else])))))]
                           [context =branch]))]
     (prn 'analyse/if (count branches) (mapv class branches) form)
     branches))
@@ -386,8 +390,9 @@
                                                                                                      :actual ==fn}))))
 
                                            :else
-                                           (assert false "Must call a Fn type."))]]
-             (fn-call context =fn =args)))
+                                           (assert false "Must call a Fn type."))]
+                 [context =return] (fn-call context =fn =args)]
+             [context =return]))
       (throw (ex-info "Function can't be applied to args." {:form form, :fn %fn, :args (vec %args)}))))
 
 (defmethod analyse ::macro [context form]

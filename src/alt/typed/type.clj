@@ -30,10 +30,10 @@
   (realize [self &env]
     (update-in self [:params] (partial mapv (&util/partial* realize &env)))))
 
-(defrecord AliasType [ctor args real]
+(defrecord TypeAlias [ctor args real]
   Type
   (realize [self &env]
-    ;; (prn 'AliasType/realize ctor args real &env)
+    ;; (prn 'TypeAlias/realize ctor args real &env)
     (-> self
         (update-in [:args] (partial mapv (&util/partial* realize &env)))
         (update-in [:real] realize &env))))
@@ -96,7 +96,7 @@
     (let [env (into (hash-map) (map vector (map :name (.-args self)) args))
           type-def* (realize type-def env)]
       (if alias
-        (AliasType. alias args type-def*)
+        (TypeAlias. alias args type-def*)
         type-def*)
       ;; (assert false)
       ))
@@ -179,9 +179,13 @@
   (FnType. arities))
 
 (defn or-type [types]
-  {:pre [(and (vector? types)
-              (every? (partial satisfies? Type) types))]}
-  (OrType. types))
+  {:pre [(every? type? types)]}
+  (let [flat-types (for [type types
+                         type (if (instance? OrType type)
+                                (.-types type)
+                                (list type))]
+                     type)]
+    (OrType. (vec flat-types))))
 
 (defn not-type [type]
   {:pre [(satisfies? Type type)]}
@@ -190,8 +194,8 @@
 (defn apply-op [^TypeOp type-op context parsing-context args]
   ((.-op-fn type-op) context parsing-context args))
 
-;; (def Falsey (AliasType. 'alt.typed/Falsey [] (or-type [Nil (LiteralType. false)])))
-;; (def Truthy (AliasType. 'alt.typed/Truthy [] (not-type Falsey)))
+;; (def Falsey (TypeAlias. 'alt.typed/Falsey [] (or-type [Nil (LiteralType. false)])))
+;; (def Truthy (TypeAlias. 'alt.typed/Truthy [] (not-type Falsey)))
 
 ;; (defmulti subsumes? (fn [expected actual] [(class expected) (class actual)])
 ;;   :default ::default
@@ -217,10 +221,10 @@
 ;; (defmethod subsumes? [OrType ::simple-type] [^OrType expected actual]
 ;;   (boolean (some (&util/partial* subsumes? actual) (.-types expected))))
 
-;; (defmethod subsumes? [AliasType ::real-type] [^AliasType expected actual]
+;; (defmethod subsumes? [TypeAlias ::real-type] [^TypeAlias expected actual]
 ;;   (subsumes? (.-real expected) actual))
 
-;; (defmethod subsumes? [::type AliasType] [expected ^AliasType actual]
+;; (defmethod subsumes? [::type TypeAlias] [expected ^TypeAlias actual]
 ;;   (subsumes? expected (.-real actual)))
 
 ;; ;; (defmethod subsumes? [::simple-type ::simple-type] [expected actual]

@@ -1,44 +1,79 @@
 (ns alt.typed.solver
   (:require (alt.typed [type :as &type]
                        [translator :as &translator])
-            (alt.typed.context [store :as &store]))
+            (alt.typed.context [store :as &store]
+                               [library :as &library]))
   (:import (alt.typed.type LiteralType
                            ClassType
                            FnType
                            TypeVar
-                           AliasType
+                           TypeAlias
                            OrType
-                           AliasType
+                           TypeAlias
                            NotType
                            AnyType
                            NothingType
                            NilType)))
 
-(def ^:private ^:dynamic *types-hierarchy*
+;; [Utils]
+(def ^:private +types-hierarchy+
   (-> (make-hierarchy)
-      (derive AliasType        ::type)
-      (derive ::real-type      ::type)
-      (derive ::complex-type   ::real-type)
+      (derive TypeVar          ::solvable)
+      (derive ::type           ::solvable)
+      (derive AnyType          ::type)
+      (derive ::bounded-type   ::type)
+      (derive ::complex-type   ::bounded-type)
       (derive NotType          ::complex-type)
       (derive OrType           ::complex-type)
-      (derive ::simple-type    ::real-type)
-      (derive AnyType          ::simple-type)
-      (derive ::bounded-type   ::simple-type)
-      (derive NothingType      ::bounded-type)
-      (derive ::unit-type      ::bounded-type)
+      (derive ::simple-type    ::bounded-type)
+      (derive NothingType      ::simple-type)
+      (derive ::unit-type      ::simple-type)
       (derive NilType          ::unit-type)
       (derive LiteralType      ::unit-type)
-      (derive ::open-type      ::bounded-type)
+      (derive ::open-type      ::simple-type)
       (derive ClassType        ::open-type)
       (derive FnType           ::open-type)
       ))
 
 ;; [Functions]
-(defmulti solve (fn [store expected actual] [(class expected) (class actual)])
-  :hierarchy #'*types-hierarchy*)
+(defmulti solve (fn [store =expected =actual] [(class =expected) (class =actual)])
+  :hierarchy #'+types-hierarchy+)
 
-;; (defmethod solve [::&type/type AliasType] [store =expected ^AliasType =actual]
-;;   (prn 'solve [::&type/type AliasType])
+(defmethod solve [TypeAlias TypeAlias] [store ^TypeAlias =expected ^TypeAlias =actual]
+  (solve store (.-real =expected) (.-real =actual)))
+
+(defmethod solve [TypeAlias ::solvable] [store ^TypeAlias =expected =actual]
+  (solve store (.-real =expected) =actual))
+
+(defmethod solve [::solvable TypeAlias] [store =expected ^TypeAlias =actual]
+  (solve store =expected (.-real =actual)))
+
+(defmethod solve [TypeVar TypeVar] [store $expected $actual]
+  (if-let [store (solve store (&store/retrieve store $expected) (&store/retrieve store $actual))]
+    (&store/redirect store $expected $actual)))
+
+(defmethod solve [::type TypeVar] [store =expected $actual]
+  (let [=actual (&store/retrieve store $actual)]
+    (or (solve store =expected =actual)
+        (if-let [store (solve store =actual =expected)]
+          (&store/constrain store $actual =expected)))))
+
+(defmethod solve [TypeVar ::type] [store $expected =actual]
+  (solve store (&store/retrieve store $expected) =actual))
+
+(defmethod solve [AnyType ::type] [store =expected =actual]
+  store)
+
+(defmethod solve [::bounded-type AnyType] [store =expected =actual]
+  nil)
+
+(defmethod solve [::simple-type NotType] [store =expected ^NotType =actual]
+  (if (not (solve store (.-type =actual) =expected))
+    store)
+  (assert false))
+
+;; (defmethod solve [::&type/type TypeAlias] [store =expected ^TypeAlias =actual]
+;;   (prn 'solve [::&type/type TypeAlias])
 ;;   (solve store =expected (.-real =actual)))
 
 ;; (defmethod solve [AnyType ::&type/type] [store =expected =actual]
@@ -93,12 +128,12 @@
 ;;   (if (&type/subsumes? =expected =actual)
 ;;     store))
 
-;; (defmethod solve [AliasType TypeVar] [store ^AliasType =expected $$actual]
-;;   (prn 'solve '[AliasType TypeVar])
+;; (defmethod solve [TypeAlias TypeVar] [store ^TypeAlias =expected $$actual]
+;;   (prn 'solve '[TypeAlias TypeVar])
 ;;   (solve store (.-real =expected) $$actual))
 
-;; (defmethod solve [AliasType AliasType] [store ^AliasType =expected ^AliasType =actal]
-;;   (prn 'solve [AliasType AliasType])
+;; (defmethod solve [TypeAlias TypeAlias] [store ^TypeAlias =expected ^TypeAlias =actal]
+;;   (prn 'solve [TypeAlias TypeAlias])
 ;;   (solve store (.-real =expected) (.-real =actal)))
 
 (defn solve-all [store =expected =actual]
@@ -115,18 +150,49 @@
           store
           (map vector =expected =actual)))
 
-;; TODO: Rewrite 'narrow to simplify it.
 ;; ;; Narrowing (finding common subtypes)
-(defmulti narrow (fn [context =t1 =t2] [(class =t1) (class =t2)])
-  :hierarchy #'*types-hierarchy*)
+(defmulti narrow (fn [store =test truthy?] (class =test))
+  :hierarchy #'+types-hierarchy+)
 
-;; (defmethod narrow [AliasType ::&type/real-type] [context ^AliasType =target =by]
+(defmethod narrow TypeAlias [store ^TypeAlias =test truthy?]
+  (narrow store (.-real =test) truthy?))
+
+(defmethod narrow NilType [store =test truthy?]
+  (if truthy?
+    nil
+    [store =test]))
+
+(defmethod narrow AnyType [store =test truthy?]
+  (if truthy?
+    [store (&library/lookup store 'alt.typed/Truthy)]
+    [store (&library/lookup store 'alt.typed/Falsey)]))
+
+(defmethod narrow TypeVar [store $test truthy?]
+  (let [=test (&store/retrieve store $test)]
+    (if-let [[store =test] (narrow store =test truthy?)]
+      [(&store/constrain store $test =test)
+       =test])))
+
+(let [filterer (fn [truthy? [store types*] type]
+                 (if-let [[store type*] (narrow store type truthy?)]
+                   [store (conj types* type*)]
+                   [store types*]))]
+  (defmethod narrow OrType [store ^OrType =test truthy?]
+    (prn 'narrow 'OrType =test)
+    (let [[store types*] (reduce (partial filterer truthy?) [store []] (.-types =test))]
+      (case (count types*)
+        0 nil
+        1 [store (first types*)]
+        ;; else
+        [store (&type/or-type types*)]))))
+
+;; (defmethod narrow [TypeAlias ::&type/real-type] [context ^TypeAlias =target =by]
 ;;   (if-let [[context =real] (narrow context (.-real =target) =by)]
 ;;     (if (= (.-real =target) =real)
 ;;       [context =target]
 ;;       [context =real])))
 
-;; (defmethod narrow [::&type/type AliasType] [context =target ^AliasType =by]
+;; (defmethod narrow [::&type/type TypeAlias] [context =target ^TypeAlias =by]
 ;;   (narrow context =target (.-real =by)))
 
 ;; (defmethod narrow [OrType NotType] [context ^OrType =target =by]
