@@ -163,6 +163,65 @@
               [(%union-add [:union [?type]] [:union ?rest] &union)]))
     ))
 
+;; Solver
+(defn %solve-all [%solve &expected &actual]
+  (matche [&expected &actual]
+    ([[] []])
+    ([[?e . ?rest] [?a . ?rem]]
+       (%solve ?e ?a)
+       (%solve-all ?rest ?rem))
+    ))
+
+(letfn [(%helper [%solve &expected &arity]
+          (matche [&expected]
+            ([[?e-arity . ?rest]]
+               (conda [(%solve ?e-arity &arity)]
+                      [(%helper %solve ?rest &arity)]))
+            ))]
+  (defn %solve-arities [%solve &expected &actual]
+    (matche [&actual]
+      ([[]])
+      ([[?a-arity . ?rem]]
+         (%helper &expected ?a-arity)
+         (%solve-arities &expected ?rem))
+      )))
+
+(defn %solve [&expected &actual]
+  (matcha [&expected &actual]
+    ([:any _])
+    ([_ :nothing])
+    ([:nil :nil])
+    ([[:primitive ?type] [:primitive ?type]])
+    ([[:literal ?class ?value] [:literal ?class ?value]])
+    ([[:object ?class _] [:literal ?class _]])
+    ([[:object ?class ?e-params] [:object ?class ?a-params]]
+       (%solve-all %solve ?e-params ?a-params))
+    ([[:object ?super-class ?e-params] [:object ?sub-class ?a-params]]
+       (fresh [$object]
+         (%as-object ?super-class &actual $object)
+         (%solve &expected $object)))
+    ([[:function ?e-arities] [:function ?a-arities]]
+       (%solve-arities %solve ?e-arities ?a-arities))
+    ([[:function ?e-arities] _]
+       (fresh [$function]
+         (%as-function &actual $function)
+         (%solve &expected $function)))
+    ([_ [:union [?type . ?rest]]]
+       (%solve %expected ?type)
+       (conde [(== ?rest [])]
+              [(%solve %expected [:union ?rest])]))
+    ([[:union [?type . ?rest]] _]
+       (conde [(%solve ?type &actual)]
+              [(!= ?rest [])
+               (%solve [:union ?rest] &actual)]))
+    ([[:alias _ ?e] [:alias _ ?a]]
+       (%solve ?e ?a))
+    ([[:alias _ ?type] _]
+       (%solve ?type &actual))
+    ([_ [:alias _ ?type]]
+       (%solve &expected ?type))
+    ))
+
 ;; Type-checker
 (defmacro with-context [&context goal]
   `(fresh ~'[&global &local]
@@ -204,7 +263,7 @@
     (fresh [$recur $args]
       (%assoc &local :recur $recur &local)
       (%type-check-all &context &args $args)
-      (%solve-all $args $recur))))
+      (%solve-all %solve $args $recur))))
 
 (defn %type-check-case [%type-check &context &form-type &pairs &type]
   (with-context &context
@@ -257,15 +316,6 @@
     ([[?name . ?rest] [?var . ?rem]]
        (%var ?name ?var)
        (%vars ?rest ?rem))
-    ))
-
-(defn %interleave [&l1 &l2 &interleaved]
-  (matche [&l1 &l2]
-    ([[] []])
-    ([[?head1 . ?tail1] [?head2 . ?tail2]]
-       (fresh [$temp]
-         (%interleave ?tail1 ?tail2 $temp)
-         (conso [?head1 ?head2] $temp &interleaved)))
     ))
 
 (defn %arity [&arity &type]
