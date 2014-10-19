@@ -5,7 +5,8 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   ;; :plugins [[cider/cider-nrepl "0.7.0"]]
   :dependencies [[org.clojure/clojure "1.6.0"]
-                 [org.clojure/core.logic "0.8.8"]]
+                 [org.clojure/core.logic "0.8.8"]
+                 [org.clojure/core.match "0.2.1"]]
   :global-vars {*warn-on-reflection* true
                 ;; *assert* false
                 })
