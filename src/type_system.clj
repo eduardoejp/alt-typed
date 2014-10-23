@@ -1,6 +1,7 @@
 (ns type-system
   (:refer-clojure :exclude [==])
-  (:require [clojure.template :refer [do-template]]
+  (:require (ts [context :as &context]
+                [util :as &util])
             [clojure.core.logic :refer :all]
             [clojure.core.logic.pldb :refer :all]
             [clojure.core.logic.protocols :refer [walk ext-no-check]]))
@@ -16,83 +17,23 @@
 ;;                               (.println System/out (apply str args)))))
 
 ;; [Utils]
-;; (defn %assoc [m k v o]
-;;   (matche [m k v o]
-;;     ([[] _ _ [[k v]]])
-;;     ([[[k v] . _] _ _ m])
-;;     ([[[k ?v]] _ _ [[k v]]]
-;;        (!= ?v v))
-;;     ([[[k ?v] . ?r] _ _ [[k v] . ?r]]
-;;        (!= ?r ())
-;;        (!= ?v v)
-;;        (!= m o))
-;;     ([[[?j ?v]] _ _ [[?j ?v] [k v]]]
-;;        (!= ?j k))
-;;     ([[[?j ?u] . ?r] _ _ [[?j ?u] . ?o]]
-;;        (!= ?r ())
-;;        (!= ?j k)
-;;        (!= m o)
-;;        (%assoc ?r k v ?o))))
-
-(defn %assoc [m k v o]
-  (matcha [m k v o]
-    ;; If there isn't a KV pair, add it.
-    ([[] _ _ [[k v]]])
-    ;; If you've found a KV pair, return it
-    ([[[k v] . _] _ _ m])
-    ;; If the value has changed, change the map
-    ([[[k ?v] . ?r] _ _ [[k v] . ?r]])
-    ;; If this isn't the KV pair, check the next
-    ([[[?j ?v] . ?m] _ _ [[?j ?v] . ?o]]
-       (%assoc ?m k v ?o))))
-
-(defn %assoc-in [m ks v o]
-  (matche [ks]
-    ([[?k . ?ks]]
-       (conda [(== ?ks [])
-               (%assoc m ?k v o)]
-              [(!= ?ks [])
-               (fresh [$v $v*]
-                 (%assoc m ?k $v o)
-                 (%assoc-in $v* ?ks v $v))]
-              ))
-    ))
-
-(defn %assoc-in! [m ks v m*]
-  (fn [substs]
-    (cond (lvar? v)
-          ((== (get-in (walk substs m) (walk substs ks)) v)
-           substs)
-          
-          (lvar? m*)
-          ((== (assoc-in (walk substs m) (walk substs ks) v) m*)
-           substs)
-          
-          :else
-          (assert false "Invalid use of %assoc-in!"))
-    ))
-
 (defn %rebind! [&var &top]
   (fn [substs]
-    (let [[_ _ $top $bottom _] (walk substs &var)]
+    (let [[_ _ $top $bottom _ :as whole] (walk substs &var)]
+      (prn '%rebind! whole &var (find (.-s substs) &var))
       (-> substs
           (ext-no-check $top &top)))))
+
+;; (defn %refine! [&binding &type]
+;;   (fn [substs]
+;;     (let [[_ $type :as whole] (walk substs &binding)]
+;;       (prn '%refine! whole)
+;;       (-> substs
+;;           (ext-no-check $type &type)))))
 
 (defn %apply! [term f return]
   (fn [substs]
     ((== return (f (-reify substs term))) substs)))
-
-(comment
-  (let [+map+ (list [:bar (list [:foo 10])])]
-    (run* [&return]
-      (%assoc-in +map+ [:yolo :lol] "meme" &return)
-      ))
-
-  (let [+map+ (list [:bar (list [:foo 10])])]
-    (run* [&return]
-      (%assoc-in +map+ [:bar :foo] &return +map+)
-      ))
-  )
 
 (defn %same-length [l1 l2]
   (matche [l1 l2]
@@ -115,15 +56,15 @@
        (%in-domain &lvar ?rest))))
 
 ;; Function normalization
-(defn extract-vars [type]
+(defn extract-vars [context type]
   (case (nth type 0)
     :function
     (let [[_ arities] type]
-      (reduce merge (map extract-vars arities)))
+      (reduce merge (map (partial extract-vars context) arities)))
     :arity
     (let [[_ args return] type
-          args-vars (reduce merge (map extract-vars args))
-          return-vars (extract-vars return)]
+          args-vars (reduce merge (map (partial extract-vars context) args))
+          return-vars (extract-vars context return)]
       (into (array-map) (for [[k :as kv] return-vars
                               :when (contains? args-vars k)]
                           kv)))
@@ -131,50 +72,52 @@
     (let [[_ _ top bottom id] type]
       (array-map id true))
 
-    :nil
-    (array-map)
-
-    :literal
+    (:any :nothing :nil :literal)
     (array-map)
     
     :object
     (let [[_ _ params] type]
-      (reduce merge (map extract-vars params)))
+      (reduce merge (map (partial extract-vars context) params)))
 
     :union
     (let [[_ types] type]
-      (reduce merge (map extract-vars types)))
+      (reduce merge (map (partial extract-vars context) types)))
+
+    :bound
+    (let [[_ label id] type]
+      (extract-vars context (get-in context [:context/bindings id])))
     ))
 
-(defn substitute-vars [substs type]
+(defn substitute-vars [context substs type]
   (case (nth type 0)
     :function
     (let [[_ arities] type]
-      [:function (map (partial substitute-vars substs) arities)])
+      [:function (map (partial substitute-vars context substs) arities)])
     :arity
     (let [[_ args return] type]
       [:arity
-       (map (partial substitute-vars substs) args)
-       (substitute-vars substs return)])
+       (map (partial substitute-vars context substs) args)
+       (substitute-vars context substs return)])
     :?
     (let [[_ _ top bottom id] type]
       (or (get substs id)
           (if (= [:nothing] bottom)
             top)))
 
-    :nil
-    type
-
-    :literal
+    (:any :nothing :nil :literal)
     type
     
     :object
     (let [[_ class params] type]
-      [:object class (mapv (partial substitute-vars substs) params)])
+      [:object class (mapv (partial substitute-vars context substs) params)])
 
     :union
     (let [[_ types] type]
-      [:union (map (partial substitute-vars substs) types)])
+      [:union (map (partial substitute-vars context substs) types)])
+
+    :bound
+    (let [[_ label id] type]
+      (substitute-vars context substs (get-in context [:context/bindings id])))
     ))
 
 (let [+var-names+ (for [digit (iterate inc 1)
@@ -182,16 +125,17 @@
                     (if (= 1 digit)
                       (symbol (str letter))
                       (symbol (str letter digit))))]
-  (defn normalize-fn [type]
-    (prn 'normalize-fn type)
-    (let [vars (extract-vars type)
-          names (take (count vars) +var-names+)
-          substs (into (array-map) (map vector (-> vars keys reverse) names))
-          pretty (substitute-vars substs type)]
-      (if (empty? substs)
-        pretty
-        [:all (-> substs vals distinct vec) pretty])
-      )))
+  (defn %normalize! [&context &type &normal]
+    #(let [type (-reify % &type)
+           _ (prn 'normalize type)
+           vars (extract-vars (walk % &context) type)
+           names (take (count vars) +var-names+)
+           substs (into (array-map) (map vector (-> vars keys reverse) names))
+           pretty (substitute-vars (walk % &context) substs type)]
+       (unify % &normal (if (empty? substs)
+                          pretty
+                          [:all (-> substs vals distinct vec) pretty]))
+       )))
 
 ;; [Rules]
 ;; Types
@@ -226,17 +170,6 @@
 (def +empty-set+ [:object 'clojure.lang.IPersistentSet [[:nothing]]])
 (def +throwable+ [:object 'java.lang.Throwable []])
 
-(defn %simple-literal [&class &value &type]
-  (all (matche [&class]
-         (['java.lang.Boolean])
-         (['java.lang.Long])
-         (['java.lang.Double])
-         (['java.lang.Character])
-         (['java.lang.String])
-         (['clojure.lang.Keyword])
-         (['clojure.lang.Symbol]))
-       (== &type [:literal &class &value])))
-
 (defn %class [&object &class]
   (matche [&object]
     ([[:object &class _]])))
@@ -267,8 +200,6 @@
 (defn %solve [&context &expected &actual]
   (all (trace-lvars '%solve &expected &actual)
        (matcha [&expected &actual]
-         ([_ [:var _ ?type]]
-            (%solve &context &expected ?type))
          ([[:any] _])
          ([_ [:nothing]])
          ([[:nil] [:nil]])
@@ -309,59 +240,49 @@
             (conda [(%solve &context &expected ?a-top)]
                    [(%solve &context ?a-top &expected)
                     (%rebind! &actual &expected)]))
+         ([_ [:bound ?label ?id]]
+            (fresh [$type]
+              (&context/%at-local &context ?id $type)
+              (%solve &context &expected $type)))
          )))
 
 ;; Filter
-(defn %filter [&context &filter &test &filtered]
-  (matche [&test]
-    ([[:union [?given . ?rest]]]
-       (conda [(%solve &context &filter ?given)
-               (conda [(== ?rest [])
-                       (== &filtered ?given)]
+(letfn [(%helper [&context &type &filter &refined]
+          (matche [&type]
+            ([[:union [?given . ?rest]]]
+               (conda [(%solve &context &filter ?given)
+                       (conda [(== ?rest [])
+                               (== &refined ?given)]
+                              [(fresh [$rest]
+                                 (conda [(%helper &context [:union ?rest] &filter $rest)
+                                         (%union-add &context [:union [?given]] $rest &refined)]
+                                        [(== &refined ?given)])
+                                 )])]
                       [(!= ?rest [])
-                       (fresh [$rest]
-                         (conda [(%filter &context &filter [:union ?rest] $rest)
-                                 (%union-add &context [:union [?given]] $rest &filtered)]
-                                [(== &filtered ?given)])
-                         )])]
-              [(!= ?rest [])
-               (%filter &context &filter [:union ?rest] &filtered)]
-              ))
-    ))
+                       (%helper &context [:union ?rest] &filter &refined)]
+                      ))
+            ))]
+  (defn %filter [&context &filter &test &new-context]
+    (matche [&test]
+      ([[:bound ?binding ?id]]
+         (fresh [$type $refined]
+           (&context/%at-local &context ?id $type)
+           (trace-lvars '%filter &filter &test)
+           (%helper &context $type &filter $refined)
+           (trace-lvars '%filter/$refined $refined &test)
+           ;; (%refine! &test $refined)
+           (&context/%refine! &context ?id $refined &new-context)
+           (trace-lvars '%filter/&test_POST &test)
+           ;; (&context/%with-local &context ?binding $refined &new-context)
+           )))))
 
-(comment
-  (let [&filter [:not [:union (list [:nil] [:literal/boolean false])]]
-        &test [:union (list [:nil] [:object 'java.lang.Long []])]]
-    (run* [&return]
-      (%filter +new-context+ &filter &test &return)))
-  [:object java.lang.Long []]
-
-  (let [&filter [:union (list [:nil] [:literal/boolean false])]
-        &test [:union (list [:nil] [:object 'java.lang.Long []])]]
-    (run* [&return]
-      (%filter +new-context+ &filter &test &return)))
-  [:nil]
-  )
+;; parse-int :: [String -> (Or nil Long)]
+;; (let [result (parse-int "1234")]
+;;   (if result
+;;     result
+;;     "YOLO"))
 
 ;; Type-checker
-(defmacro with-context [&context goal]
-  `(fresh ~'[&global &local
-             &aliases &classes
-             &imports &refers]
-     (== ~&context ~'{:env/global &global :env/local &local
-                      :types/aliases &aliases, :types/classes &classes
-                      :deps/imports &imports, :deps/refers &refers})
-     ~goal))
-
-(def +new-context+ (list [:env/global []]
-                         [:env/local []]
-                         [:types []]
-                         [:types/context []]
-                         [:types/aliases []]
-                         [:types/classes []]
-                         [:deps/imports []]
-                         [:deps/refers []]))
-
 (defn %union-add [&context &union &type &new-union]
   (matcha [&union &type]
     ([[:union _] [:union [?type . ?rest]]]
@@ -410,10 +331,6 @@
          )
        (trace-lvars '%union/return &union)))
 
-(defn %unalias [&context &alias &type]
-  (with-context &context
-    (%assoc &aliases &alias &type &aliases)))
-
 (let [map-arities (fn [&key-type]
                     (list {:args (list [:object 'clojure.lang.IPersistentMap [&key-type 'v]])
                            :return [:union (list [:nil] 'v)]}
@@ -444,7 +361,7 @@
          (== &function [:all ['k 'v] [:function (map-arities &type)]]))
       ([[:object 'clojure.lang.IPersistentVector [?elem]]]
          (fresh [$idx]
-           (%unalias &context 'alt.typed/AnyInteger $idx)
+           (&context/%find-type &context 'alt.typed/AnyInteger $idx)
            (== &function [:function (kv-arities $idx ?elem)])))
       ([[:object 'clojure.lang.IPersistentMap [?key ?val]]]
          (== &function [:function (kv-arities ?key ?val)]))
@@ -454,7 +371,6 @@
          (== &function &type))
       )))
 
-;; PHASE 2
 (defn %type-check-all [%type-check &context &forms &types &new-context]
   (matche [&forms &types]
     ([[] []]
@@ -464,84 +380,20 @@
          (%type-check &context ?form ?type $context)
          (%type-check-all %type-check $context ?rest ?rem &new-context)))))
 
-(do-template [<rel> <multi> <finder> <key>]
-  (do (defn <rel> [&context &label &type &new-context]
-        ;; (%assoc-in &context [<key> &label] &type &new-context)
-        (fresh [&original $changed]
-          (%assoc &context <key> &original &context)
-          (%assoc &original &label &type $changed)
-          (%assoc &context <key> $changed &new-context)))
-    (defn <multi> [&context &labels &types &new-context]
-      (matche [&labels &types]
-        ([[] []]
-           (== &context &new-context))
-        ([[?label . ?rest] [?type . ?rem]]
-           (fresh [$context]
-             (<rel> &context ?label ?type $context)
-             (<multi> $context ?rest ?rem &new-context)))
-        ))
-    (defn <finder> [&context &label &value]
-      (fresh [&data]
-        (%assoc &context <key> &data &context)
-        (%assoc &data &label &value &data))))
-
-  %with-local    %with-locals    %find-local    :env/local
-  %with-global   %with-globals   %find-global   :env/global
-  %with-type     %with-types     %find-type     :types
-  %with-type-var %with-type-vars %find-type-var :types/context
-  )
-
-(defn %type-check-let [%type-check &context &bindings &body &type &new-context]
-  (matche [&bindings]
-    ([[]]
-       (%type-check &context &body &type &new-context))
-    ([[?label ?value . ?bindings]]
-       (fresh [$value $local $context $context*]
-         (%type-check &context ?value $value &context)
-         (%with-local &context ?label $value $context)
-         (%type-check-let %type-check $context ?bindings &body &type $context*)
-         (== &context &new-context)
-         ))
-    ))
-
-(defn %type-check-recur [%type-check &context &args]
-  (with-context &context
-    (fresh [$recur $args]
-      (%assoc &local :recur $recur &local)
-      (%type-check-all &context &args $args)
-      (%solve-all %solve $args $recur))))
-
 (defn %type-check-case [%type-check &context &form-type &pairs &type]
-  (with-context &context
-    (matche [&pairs]
-      ([[?else]]
-         (%type-check &context ?else &type))
-      ([[?match ?expr . ?rest]]
-         (fresh [$match $expr]
-           (%type-check &context ?match $match)
-           (%type-check &context ?expr $expr)
-           (conda [(== [] ?rest)
-                   (== &type $expr)]
-                  [(fresh [$others]
-                     (%type-check-case %type-check &context &form-type ?rest $others)
-                     (%union-add [:union [$expr]] $others &type))])
-           ))
-      )))
-
-(defn %init-type-vars [&templates &type-vars]
-  (matche [&templates &type-vars]
-    ([[] []])
-    ([[?template . ?rest] [?var . ?rem]]
-       (== ?var [:var ?template])
-       (%init-type-vars ?rest ?rem))
-    ))
-
-(defn %instance-class [&class &instance]
-  (matche [&class]
-    ([[:class ?name ?params . _]]
-       (fresh [$params]
-         (%init-type-vars ?params $params)
-         (== &instance [:object ?name $params])))
+  (matche [&pairs]
+    ([[?else]]
+       (%type-check &context ?else &type))
+    ([[?match ?expr . ?rest]]
+       (fresh [$match $expr]
+         (%type-check &context ?match $match)
+         (%type-check &context ?expr $expr)
+         (conda [(== [] ?rest)
+                 (== &type $expr)]
+                [(fresh [$others]
+                   (%type-check-case %type-check &context &form-type ?rest $others)
+                   (%union-add [:union [$expr]] $others &type))])
+         ))
     ))
 
 (defn %type-check-catch [%type-check &context &catch &type]
@@ -551,17 +403,11 @@
          (%type-check &context ?class $class)
          (matche [$class]
            ([[:class . _]]
-              (%instance-class $class $ex)
-              (%with-local &context ?ex $ex $context)
+              ;; (%instance-class $class $ex)
+              (&context/%with-local &context ?ex $ex $context)
               (%type-check &context ?body &type)))
          ))
     ))
-
-(defn %intern-var [&context &var &type &new-context]
-  (fresh [&global $global]
-    (%assoc &context :env/global &global &context)
-    (%assoc &global &var &type $global)
-    (%assoc &context :env/global $global &new-context)))
 
 (defn %type-check-loop-bindings [%type-check &context &bindings &recur]
   (matche [&bindings]
@@ -570,7 +416,7 @@
     ([[?label ?value . ?bindings]]
        (fresh [$value $context $recur]
          (%type-check &context ?value $value)
-         (%with-local &context ?label $value $context)
+         (&context/%with-local &context ?label $value $context)
          (%type-check-loop-bindings %type-check $context ?bindings $recur)
          (conso $value $recur &recur)))
     ))
@@ -608,7 +454,7 @@
        (matche [&arity &type]
          ([[?args ?body] [:arity ?inputs ?output]]
             (fresh [$context]
-              (%with-locals &context ?args ?inputs $context)
+              (&context/%with-locals &context ?args ?inputs $context)
               (trace-lvars '%type-check-arity/$context $context)
               (%type-check $context ?body ?output &new-context)))
          )))
@@ -622,18 +468,6 @@
             (fresh [$context]
               (%type-check-arity %type-check &context ?arity ?type $context)
               (%type-check-arities %type-check $context ?rest ?rem &new-context)))
-         )))
-
-(defn %type-check-fn [%type-check &context &name &arities &type &new-context]
-  (all (trace-lvars '%type-check-fn &name &arities)
-       (fresh [$types]
-         (%arities &arities $types)
-         (trace-lvars '%type-check-fn/%arities $types)
-         (== &type [:function $types])
-         (trace-lvars '%type-check-fn/&type &type)
-         (fresh [$context]
-           (%with-local &context &name &type $context)
-           (%type-check-arities %type-check $context &arities $types &new-context))
          )))
 
 (letfn [(%helper [&context &arities &args &type]
@@ -652,37 +486,33 @@
               (%helper &context ?arities &args &type))
            ))))
 
-(defn %class-lookup [&context &name &class]
-  (with-context &context
-    (%assoc &classes &name &class &classes)))
-
 (defn %field-read [&context &object|class &field &type]
   (matche [&object|class]
     ([[:object ?class-name ?params]]
        (fresh [$class]
-         (%class-lookup &context ?class-name $class)
+         (&context/%find-class &context ?class-name $class)
          (matche [$class]
            ([[:class _ _ _ _ _ ?dynamic-fields _]]
-              (%assoc ?dynamic-fields &field &type ?dynamic-fields)))
+              (&util/%get! ?dynamic-fields &field &type)))
          ))
     ([[:class _ _ _ ?static-fields _ _ _]]
-       (%assoc ?static-fields &field &type ?static-fields))
+       (&util/%get! ?static-fields &field &type))
     ))
 
 (defn %method-call [&context &object|class &method &args &type]
   (matche [&object|class]
     ([[:object ?class-name ?params]]
        (fresh [$class]
-         (%class-lookup &context ?class-name $class)
+         (&context/%find-class &context ?class-name $class)
          (matche [$class]
            ([[:class _ _ _ _ _ _ ?dynamic-methods]]
               (fresh [$method]
-                (%assoc ?dynamic-methods &method $method ?dynamic-methods)
+                (&util/%get! ?dynamic-methods &method $method)
                 (%fn-call $method &args &type))))
          ))
     ([[:class _ _ _ _ ?static-methods _ _]]
        (fresh [$method]
-         (%assoc ?static-methods &method $method ?static-methods)
+         (&util/%get! ?static-methods &method $method)
          (%fn-call $method &args &type)))
     ))
 
@@ -699,44 +529,6 @@
          (%helper ?constructors &args &object)
          ))))
 
-(defn %in-ns [&context ?name &new-context]
-  (with-context &context
-    (== &new-context {:ns {:name ?name
-                           :refers []
-                           :imports []}
-                      :env {:global &global
-                            :local &local}})))
-
-(defn %import [&context &new-imports &new-context]
-  (with-context &context
-    (matche [&new-imports]
-      ([[]]
-         (== &context &new-context))
-      ([[[?short ?long] . ?rest]]
-         (fresh [$context $name $refers $imports]
-           (%assoc &imports ?short ?long $imports)
-           (== $context {:ns {:name $name
-                              :refers $refers
-                              :imports $imports}
-                         :env {:global &global
-                               :local &local}})
-           (%import $context ?rest &new-context))))))
-
-(defn %refer [&context &new-refers &new-context]
-  (with-context &context
-    (matche [&new-refers]
-      ([[]]
-         (== &context &new-context))
-      ([[?refer . ?rest]]
-         (fresh [$context $name $refers $imports]
-           (conso ?refer &refers $refers)
-           (== $context {:ns {:name $name
-                              :refers $refers
-                              :imports $imports}
-                         :env {:global &global
-                               :local &local}})
-           (%refer $context ?rest &new-context))))))
-
 (defn %parse-all-types [%parse-type &context &descs &types]
   (matche [&descs &types]
     ([[] []])
@@ -744,11 +536,6 @@
        (%parse-all-types %parse-type &context ?rest ?rem)
        (%parse-type &context ?desc ?type))
     ))
-
-(defn %lookup-type [&context &type-name &type]
-  (fresh [&types]
-    (%assoc &context :types &types &context)
-    (%assoc &types &type-name &type &types)))
 
 (defn %type-ctor-call [&context &ctor &args &type]
   (all (trace-lvars (pr-str '%type-ctor-call)
@@ -762,7 +549,7 @@
 (defn %parse-type [&context &type-desc &type]
   (all (trace-lvars (pr-str '%parse-type)
                     &type-desc)
-       (matche [&type-desc]
+       (matcha [&type-desc]
          ([[:form/function ?arities]]
             (!= ?arities [])
             (fresh [$arities]
@@ -776,8 +563,7 @@
          ([[:form/type-name ?name]]
             (conda [(== ?name nil)
                     (== &type [:nil])]
-                   [(!= ?name nil)
-                    (%lookup-type &context ?name &type)])
+                   [(&context/%find-type &context ?name &type)])
             (trace-lvars (pr-str '[:form/type-name ?name])
                          ?name &type)
             (matcha [&type]
@@ -786,16 +572,14 @@
               ([_]
                  s#)))
          ([[:form/type-ctor ?name ?args]]
-            (trace-lvars (pr-str :form/type-ctor)
-                         ?name ?args)
+            (trace-lvars :form/type-ctor ?name ?args)
             (fresh [$ctor $args]
-              (%lookup-type &context ?name $ctor)
+              (&context/%find-type &context ?name $ctor)
               (%parse-all-types %parse-type &context ?args $args)
               (%type-ctor-call &context $ctor $args &type)))
          ([[:all ?args ?inner]]
             (fresh [$context $inner]
-              (%with-type-vars &context ?args ?args $context)
-              (%parse-type $context ?inner $inner)
+              (%parse-type &context ?inner $inner)
               (== &type [:all ?args $inner])))
          ([[:alias ?name ?params ?inner]]
             (fresh [$inner]
@@ -815,28 +599,28 @@
                                (conso $type ?parsed-rest $full)
                                (== &type [:union $full])))))])))
          ([_]
-            (%find-type-var &context &type-desc &type))
+            (== &type &type-desc))
          )))
 
 (defn %type-check [&context &form &type &new-context]
-  (all (trace-lvars '%type-check &form)
+  (all (trace-lvars '%type-check &form &context)
        (matcha [&form &new-context]
          ([:literal/nil &context]
             (== &type [:nil]))
          ([[:literal/boolean ?value] &context]
-            (%simple-literal 'java.lang.Boolean ?value &type))
+            (== &type [:literal 'java.lang.Boolean ?value]))
          ([[:literal/integer ?value] &context]
-            (%simple-literal 'java.lang.Long ?value &type))
+            (== &type [:literal 'java.lang.Long ?value]))
          ([[:literal/real ?value] &context]
-            (%simple-literal 'java.lang.Double ?value &type))
+            (== &type [:literal 'java.lang.Double ?value]))
          ([[:literal/character ?value] &context]
-            (%simple-literal 'java.lang.Character ?value &type))
+            (== &type [:literal 'java.lang.Character ?value]))
          ([[:literal/string ?value] &context]
-            (%simple-literal 'java.lang.String ?value &type))
+            (== &type [:literal 'java.lang.String ?value]))
          ([[:literal/keyword ?value] &context]
-            (%simple-literal 'clojure.lang.Keyword ?value &type))
+            (== &type [:literal 'clojure.lang.Keyword ?value]))
          ([[:literal/symbol ?value] &context]
-            (%simple-literal 'clojure.lang.Symbol ?value &type))
+            (== &type [:literal 'clojure.lang.Symbol ?value]))
          ([[:literal/big-int ?value] &context]
             (== &type [:literal 'clojure.lang.BigInt ?value]))
          ([[:literal/big-decimal ?value] &context]
@@ -852,22 +636,8 @@
          ([[:literal/set []] &context]
             (== &type +empty-set+))
          ([[:symbol ?symbol] &context]
-            (conda [(fresh [&local $type]
-                      (%assoc &context :env/local &local &context)
-                      (%assoc &local ?symbol &type &local))]
-                   [(fresh [&global]
-                      (%assoc &context :env/global &global &context)
-                      (%assoc &global ?symbol &type &global))]
-                   [(fresh [&imports &classes $long]
-                      (%assoc &context :deps/imports &imports &context)
-                      (%assoc &context :types/classes &classes &context)
-                      (%assoc &imports ?symbol $long &imports)
-                      (%assoc &classes $long &type &classes))]
-                   [(fresh [&imports &classes $short]
-                      (%assoc &context :deps/imports &imports &context)
-                      (%assoc &context :types/classes &classes &context)
-                      (%assoc &imports $short ?symbol &imports)
-                      (%assoc &classes ?symbol &type &classes))])
+            (conda [(&context/%find-local &context ?symbol &type)]
+                   [(&context/%find-var &context ?symbol &type)])
             (trace-lvars '[:symbol ?symbol] &type))
          ([[:form/do . ?body] ?context]
             (fresh [$types]
@@ -878,18 +648,32 @@
             (log "[SYSTEM ERROR] letfn hasn't been implemented yet.")
             u#)
          ([[:form/let ?bindings ?body] ?context]
-            (%type-check-let %type-check &context ?bindings ?body &type ?context))
+            (matcha [?bindings]
+              ([[]]
+                 (%type-check &context ?body &type ?context))
+              ([[?label ?value . ?rem]]
+                 (fresh [$value $context]
+                   (%type-check &context ?value $value &context)
+                   (&context/%with-local &context ?label $value $context)
+                   (trace-lvars 'let/$context $context)
+                   (%type-check $context [:form/let ?rem ?body] &type ?context)))
+              ))
          ([[:form/if ?test ?then ?else] &context]
-            (let [+falsey+ [:union (list [:nil] [:literal/boolean false])]
+            (let [+falsey+ [:union (list [:nil] [:literal 'java.lang.Boolean false])]
                   +truthy+ [:not +falsey+]]
-              (fresh [$test $test-then $test-else]
+              (fresh [$test $then-context $else-context]
                 (%type-check &context ?test $test &context)
                 (trace-lvars 'if/$test $test)
-                (conda [(%filter &context +truthy+ $test $test-then)
-                        (%type-check &context ?then &type &context)]
-                       [(%filter &context +falsey+ $test $test-else)
-                        (%type-check &context ?else &type &context)]
+                (conda [(conde [(fresh [$context]
+                                  (%filter &context +truthy+ $test $context)
+                                  (trace-lvars 'if/then $context)
+                                  (%type-check $context ?then &type $context))]
+                               [(fresh [$context]
+                                  (%filter &context +falsey+ $test $context)
+                                  (trace-lvars 'if/else $context)
+                                  (%type-check $context ?else &type $context))])]
                        [(fresh [$then $else]
+                          (trace-lvars 'if &context)
                           (%type-check &context ?then $then &context)
                           (%type-check &context ?else $else &context)
                           (%union &context [$then $else] &type))])
@@ -915,30 +699,35 @@
             (fresh [$form]
               (%type-check &context ?form $form)
               (%type-check-case %type-check &context $form ?pairs &type)))
-         ([[:form/loop ?bindings ?body] _]
+         ([[:form/loop ?bindings ?body] &context]
             (fresh [$recur &local $local $context]
-              (%assoc &context :env/local &local &context)
               (%type-check-loop-bindings %type-check &context ?bindings $recur)
-              (%assoc &local :recur $recur $local)
-              (%assoc &context :env/local $local $context)
+              (&context/%with-local &context :recur $recur $context)
               (%type-check $context ?body &type)))
          ([[:form/fn ?name ?arities] ?context]
-            (fresh [$fn]
-              (%type-check-fn %type-check &context ?name ?arities $fn ?context)
-              (%apply! $fn normalize-fn &type)))
+            (fresh [$fn $types $context]
+              (trace-lvars '%type-check-fn ?name ?arities)
+              (%arities ?arities $types)
+              (trace-lvars '%type-check-fn/%arities $types)
+              (== $fn [:function $types])
+              (== $fn &type)
+              (trace-lvars '%type-check-fn/&type $fn)
+              (&context/%with-local &context ?name $fn $context)
+              (%type-check-arities %type-check $context ?arities $types ?context)
+              ;; (%apply! $fn normalize &type)
+              ))
          ([[:form/def ?var] ?context]
-            (fresh [$global]
-              (%intern-var &context ?var [:nothing] ?context)
-              (== &type [:object 'clojure.lang.Var [[:nothing]]])))
+            (&context/%intern-var &context ?var [:nothing] ?context)
+            (== &type [:object 'clojure.lang.Var [[:nothing]]]))
          ([[:form/def ?var ?value] ?context]
-            (fresh [$global $value $context]
+            (fresh [$value $context]
               (%type-check &context ?value $value $context)
-              (%intern-var $context ?var $value ?context)
-              (== &type [:object 'clojure.lang.Var [$value]])))
+              (&context/%intern-var $context ?var $value ?context)
+              (== &type [:object 'clojure.lang.Var [$value]])
+              (trace-lvars "POST-interning..." ?var $value ?context &new-context)))
          ([[:form/var ?var] &context]
-            (fresh [&global $var-type]
-              (%assoc &context :env/global &global &context)
-              (%assoc &global ?var $var-type &global)
+            (fresh [$var-type]
+              (&context/%find-var &context ?var $var-type)
               (== &type [:object 'clojure.lang.Var [$var-type]])))
          ([[:form/dot ?object|class ?field|method] _]
             (fresh [$object|class]
@@ -1030,21 +819,24 @@
             ;; (%type-check-body %type-check &context ?body &type)
             )
          ([[:form/recur ?args] _]
-            (%type-check-recur %type-check &context ?args)
-            (== &type [:nothing]))
+            (fresh [$recur $args]
+              (&context/%find-local &context :recur $recur)
+              (%type-check-all &context ?args $args)
+              (%solve-all %solve &context $args $recur)
+              (== &type [:nothing])))
          ([[:form/import ?import] _]
             (fresh [$context $class]
-              (%import &context ?import $context)
+              (&context/%import! &context ?import $context)
               (matche [?import]
                 ([[?short ?long]]
                    (== &type [:object 'java.lang.Class [?long]])))))
          ([[:form/refer ?requires] _]
             (fresh [$context]
-              (%refer &context ?requires $context)
+              (&context/%refer! &context ?requires $context)
               (== &type [:nil])))
          ([[:form/ns ?name ?options] _]
             (fresh [$context $options]
-              (%in-ns &context ?name $context)
+              (&context/%in-ns &context ?name $context)
               (%type-check-all %type-check $context ?options $options)
               (== &type [:nil])))
          ([[:form/fn-call ?function ?args] ?context]
@@ -1052,65 +844,67 @@
                     $context]
               (%type-check &context ?function $function $context)
               (%type-check-all %type-check &context ?args $args ?context)
-              (%as-function ?context $function $function*)
+              (matcha [$function]
+                ([[:bound ?label ?id]]
+                   (fresh [$type]
+                     (&context/%at-local ?context ?id $type)
+                     (%as-function ?context $type $function*)))
+                ([_]
+                   (%as-function ?context $function $function*)))
               (%fn-call &context $function* $args &type)))
          ([[:form/ann ?var ?type-desc] ?context]
             (trace-lvars '[:form/ann ?var ?type-desc] ?var ?type-desc)
             (fresh [$type]
               (%parse-type &context ?type-desc $type)
-              (%with-global &context ?var $type ?context)
+              (&context/%intern-var &context ?var $type ?context)
               (== &type [:nil])))
          ([[:form/defalias [?alias . ?params] ?type-def] ?context]
             (conda [(== ?params [])
                     (fresh [$type]
                       (%parse-type &context ?type-def $type)
-                      (%with-type &context ?alias $type ?context))]
-                   [(!= ?params [])
-                    (fresh [$type-def $type]
+                      (&context/%learn-type &context ?alias $type ?context))]
+                   [(fresh [$type-def $type]
                       (== $type-def [:all ?params
                                      [:alias ?alias ?params
                                       ?type-def]])
                       (%parse-type &context $type-def $type)
-                      (%with-type &context ?alias $type ?context))]
-                   )
+                      (&context/%learn-type &context ?alias $type ?context))])
             (== &type [:nil]))
          )))
 
 (comment
-  (defn try-form
-    ([form]
-       (let [results (run* [&type &context]
-                       (%type-check +new-context+ form &type &context))]
-         (prn '(count results) (count results))
-         (assert (= 1 (count results)))
-         (let [[[type context]] results]
-           (prn 'context context)
-           type)))
-    ([locals form]
-       (let [locals* (for [[label type] locals] [label type])
-             results (run* [&type &context]
-                       (fresh [$context]
-                         (%assoc +new-context+ :env/local locals* $context)
-                         (%type-check $context form &type &context)))]
-         (prn '(count results) (count results))
-         ;; (assert (= 1 (count results)))
-         (mapv (comp prn first) results)
-         (let [[[type context]] results]
-           ;; (prn 'context context)
-           type)
-         )))
-
-  (defn try-form+
-    ([context form]
-       (let [results (run* [&type &context]
-                       (%type-check context form &type &context))]
-         (assert (== 1 (count results)))
-         (let [[[type context]] results]
-           (prn 'context context)
-           type))))
-
-  (do (assert (= [:nil]
-                 (try-form :literal/nil)))
+  (do (defn try-form
+        ([form]
+           (prn 'try-form form)
+           (let [results (run* [&type &context]
+                           (%type-check &context/+new-context+ form &type &context))]
+             (prn '(count results) (count results))
+             ;; (assert (= 1 (count results)))
+             (first (run* [&return]
+                      (fresh [$union]
+                        (let [context (-> results last (nth 1))]
+                          (all (%union context
+                                       (for [[type context] results] type)
+                                       $union)
+                               (trace-lvars 'DONE $union)
+                               (%normalize! context $union &return))))))))
+        ([extras form]
+           (prn 'try-form form)
+           (let [results (run* [&type &context]
+                           (%type-check (merge-with merge &context/+new-context+ extras)
+                                        form &type &context))]
+             (prn '(count results) (count results))
+             (first (run* [&return]
+                      (fresh [$union]
+                        (let [context (-> results last (nth 1))]
+                          (all (%union context
+                                       (for [[type context] results] type)
+                                       $union)
+                               (trace-lvars 'DONE $union)
+                               (%normalize! context $union &return))))))
+             )))
+    (assert (= [:nil]
+               (try-form :literal/nil)))
     (assert (= [:literal 'java.lang.Boolean true]
                (try-form [:literal/boolean true])))
     (assert (= [:literal 'java.lang.Long 10]
@@ -1163,38 +957,29 @@
                           [:form/def 'foo :literal/nil]
                           [:form/var 'foo]])))
     (assert (= [:union (list [:nil] [:object 'java.lang.Long []])]
-               (try-form {'parse-int [:function (list [:arity
-                                                       (list [:object 'java.lang.String []])
-                                                       [:union (list [:nil] [:object 'java.lang.Long []])]])]}
+               (try-form {:env/local {'parse-int [:function (list [:arity
+                                                                   (list [:object 'java.lang.String []])
+                                                                   [:union (list [:nil] [:object 'java.lang.Long []])]])]}}
                          [:form/fn-call [:symbol 'parse-int] (list [:literal/string "1234"])])))
-    (assert (= [:union (list [:object 'java.lang.Long []] [:literal 'java.lang.String "YOLO"])]
-               (try-form {'parse-int [:function (list [:arity
-                                                       (list [:object 'java.lang.String []])
-                                                       [:union (list [:nil] [:object 'java.lang.Long []])]])]}
+    (assert (= '[:union ([:literal java.lang.String "YOLO"] [:object java.lang.Long []])]
+               (try-form {:env/local {'parse-int [:function (list [:arity
+                                                                   (list [:object 'java.lang.String []])
+                                                                   [:union (list [:nil] [:object 'java.lang.Long []])]])]}}
                          [:form/let ['result [:form/fn-call [:symbol 'parse-int] (list [:literal/string "1234"])]]
-                          [:form/do
-                           [:form/if [:symbol 'result]
-                            [:symbol 'result]
-                            [:literal/string "YOLO"]]
-                           ]])))
-    (let [+new-context+ (list [:env/global []]
-                              [:env/local []]
-                              [:types (list ['java.lang.String [:object 'java.lang.String []]]
-                                            ['java.lang.Long [:object 'java.lang.Long []]]
-                                            ['alt.typed/Or [:ctor/union]])]
-                              [:types/aliases []]
-                              [:types/classes []]
-                              [:deps/imports []]
-                              [:deps/refers []])]
-      (assert (= [:union [[:nil] [:object 'java.lang.Long []]]]
-                 (try-form+ +new-context+
-                            [:form/do
-                             [:form/ann 'parse-int
-                              [:form/function (list [:form/arity
-                                                     (list [:form/type-name 'java.lang.String])
-                                                     [:form/type-ctor 'alt.typed/Or (list [:form/type-name nil]
-                                                                                          [:form/type-name 'java.lang.Long])]])]]
-                             [:form/fn-call [:symbol 'parse-int] (list [:literal/string "1234"])]]))))
+                          [:form/if [:symbol 'result]
+                           [:symbol 'result]
+                           [:literal/string "YOLO"]]])))
+    (assert (= [:union [[:nil] [:object 'java.lang.Long []]]]
+               (try-form {:types {'java.lang.String [:object 'java.lang.String []]
+                                  'java.lang.Long [:object 'java.lang.Long []]
+                                  'alt.typed/Or [:ctor/union]}}
+                         [:form/do
+                          [:form/ann 'parse-int
+                           [:form/function (list [:form/arity
+                                                  (list [:form/type-name 'java.lang.String])
+                                                  [:form/type-ctor 'alt.typed/Or (list [:form/type-name nil]
+                                                                                       [:form/type-name 'java.lang.Long])]])]]
+                          [:form/fn-call [:symbol 'parse-int] (list [:literal/string "1234"])]])))
     (assert (= [:nil]
                (try-form [:form/defalias ['Maybe 'x]
                           [:union (list [:form/type-name nil] 'x)]])))
@@ -1203,13 +988,15 @@
                           (list [['x]
                                  [:form/do [:symbol 'x]]])])))
     (assert (= '[:function ([:arity ([:object java.lang.String []]) [:union ([:nil] [:object java.lang.Long []])]])]
-               (try-form {'parse-int [:function (list [:arity
-                                                       (list [:object 'java.lang.String []])
-                                                       [:union (list [:nil] [:object 'java.lang.Long []])]])]}
+               (try-form {:env/local {'parse-int [:function (list [:arity
+                                                                   (list [:object 'java.lang.String []])
+                                                                   [:union (list [:nil] [:object 'java.lang.Long []])]])]}}
                          [:form/fn 'foo
                           (list [['x]
                                  [:form/fn-call [:symbol 'parse-int] (list [:symbol 'x])]])])))
     )
+
+  
   
   (try-form {'long? [:function (list [:arity
                                       (list [:object 'java.lang.Long []])
@@ -1277,3 +1064,116 @@
 ;; pre/post conditions.
 ;; Metadata.
 ;; SET!
+
+;; (match [form]
+;;   ([[:form/let [?label ?value] ?body]]
+;;      (run* [type (type-check ?value)
+;;             local (with-local ?label type)
+;;             =type (type-check ?body)
+;;             _ (without-local ?label)]
+;;        (return =type))))
+
+(comment
+  (defprotocol Monad
+    (bind [monad m-value step])
+    (return [monad value]))
+
+  (deftype StateSeqMonad []
+    Monad
+    (bind [self m-value step]
+      #(mapcat m-value (step %)))
+    (return [self value]
+      ))
+
+  (defmacro exec [steps return]
+    (assert (not= 0 (count steps)) "The steps can't be empty!")
+    (assert (= 0 (rem (count steps) 2)) "The number of steps must be even!")
+    (let [[label computation & steps*] steps]
+      (if (empty? steps*)
+        `(bind ~computation
+               (fn [~label]
+                 (return ~return)))
+        `(bind ~computation
+               (fn [~label]
+                 (exec ~(vec steps*) ~return))))))
+
+  ((fn [type])
+   (type-check ?value))
+
+  (for [x (range 10)
+        y (range x)]
+    [x y])
+
+  (bind (range 10)
+        (fn [x]
+          (bind (range x)
+                (fn [y]
+                  (return [x y])))))
+
+  (defn bind [m-value step]
+    (mapcat step m-value))
+
+  (defn return [value]
+    (list value))
+  
+  (let [monad (StateSeqMonad)
+        bind #(bind monad % %)
+        return #(return monad %)]
+    (bind (fn [type])
+          ...))
+  
+  (exec (StateSeqMonad)
+        [type (type-check ?value)
+         local (with-local ?label type)
+         =type (type-check ?body)
+         _ (without-local ?label)]
+        =type)
+
+  (bind (type-check ?value)
+        (fn [type]
+          (bind (with-local ?label type)
+                (fn [local]
+                  (bind (type-check ?body)
+                        (fn [=type]
+                          (bind (without-local ?label)
+                                (fn [_]
+                                  (return =type)))))))))
+
+  (defn bind [m-value step]
+    #(for [[state* datum] (mapcat m-value %)
+           [state** other-datum] ((step datum) state*)]
+       state**))
+
+  (defn return [value]
+    #(for [state %]
+       [state value]))
+  
+
+  (for [[world =value] (type-check world ?value)
+        [world local] (with-local world ?label =value)
+        [world =body] (type-check world ?body)
+        [world _] (without-local world ?label)]
+    [world =body])
+
+  (exec (AsyncMonad)
+        [google (GET! "http://www.google.com")
+         yahoo (GET! "http://www.yahoo.com")
+         facebook (GET! "http://www.facebook.com")]
+        (prn-str [google yahoo facebook]))
+
+  (defn exec-all [monad steps]
+    (if (empty? steps)
+      (return monad '())
+      (exec monad
+            [datum (first steps)
+             data (async-doall (rest steps))]
+            (cons datum data))))
+
+  (exec (AsyncMonad)
+        [[google yahoo facebook] (exec-all (AsyncMonad)
+                                           [(GET! "http://www.google.com")
+                                            (GET! "http://www.yahoo.com")
+                                            (GET! "http://www.facebook.com")])]
+        (prn-str [google yahoo facebook]))
+  )
+

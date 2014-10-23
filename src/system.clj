@@ -98,10 +98,8 @@
         `(cond-let ~@clauses))))
 
 (defn parallel [steps]
-  (exec state-seq-m
-    [step (return-all steps)
-     value step]
-    value))
+  (fn [state]
+    (some identity (map #(seq (% state)) steps))))
 
 (defn collect [step]
   #(list [% (step %)]))
@@ -198,44 +196,13 @@
      _ unbind-local]
     =type))
 
-(def +falsey+ [:union (list [:nil] [:object 'java.lang.Boolean false])])
-(def +truthy+ [:complement [:union (list [:nil] [:object 'java.lang.Boolean false])]])
-(def ^:private +ambiguous+ [:complement [:union (list +falsey+ +truthy+)]])
+(def +falsey+ [:union (list [:nil] [:literal 'java.lang.Boolean false])])
+(def +truthy+ [:complement +falsey+])
+(def ^:private +ambiguous+ [:any])
 
 (defn unify [expected actual]
-  ;; (prn 'unify expected actual)
+  (prn 'unify expected actual)
   (match [expected actual]
-    [[:any] _]
-    (return state-seq-m true)
-
-    [_ [:nothing]]
-    (return state-seq-m true)
-
-    [[:nil] [:nil]]
-    (return state-seq-m true)
-
-    [[:literal _ _] [:literal _ _]]
-    (if (= expected actual)
-      (return state-seq-m true)
-      zero)
-
-    [[:object ?class _] [:literal ?lit-class _]]
-    (if (= ?class ?lit-class)
-      (return state-seq-m true)
-      zero)
-
-    [[:union ?types] _]
-    (exec state-seq-m
-      [=type (return-all ?types)
-       _ (unify =type actual)]
-      true)
-
-    [[:complement ?type] _]
-    (fn [state]
-      (if (empty? ((unify ?type actual) state))
-        (list [state true])
-        (zero nil)))
-
     [_ [:bound ?id]]
     (exec state-seq-m
       [=type (deref-local ?id)
@@ -251,7 +218,61 @@
                        _ (update-type-var ?id expected =bottom)]
                       true)])]
       true)
-    
+
+    [[:any] _]
+    (return state-seq-m true)
+
+    [_ [:nothing]]
+    (return state-seq-m true)
+
+    [[:nil] [:nil]]
+    (return state-seq-m true)
+
+    [[:literal ?e-class ?e-value] [:literal ?a-class ?a-value]]
+    (do (prn '[[:literal _ _] [:literal _ _]] [expected actual]
+             `(~'= ~?e-class ~?a-class) (.equals ?e-class ?a-class)
+             `(~'= ~?e-value ~?a-value) (= ?e-value ?a-value)
+             (and (= ?e-class ?a-class)
+                  (= ?e-value ?a-value)))
+      (if (and (= ?e-class ?a-class)
+               (= ?e-value ?a-value))
+        (return state-seq-m true)
+        zero))
+
+    [[:object ?class _] [:literal ?lit-class _]]
+    (if (= ?class ?lit-class)
+      (return state-seq-m true)
+      zero)
+
+    [[:object ?e-class ?e-params] [:object ?a-class ?a-params]]
+    (if (= ?e-class ?a-class)
+      (exec state-seq-m
+        [_ (map-m state-seq-m
+                  (fn [[e a]] (unify e a))
+                  (map vector ?e-params ?a-params))]
+        true)
+      zero)
+
+    [[:union ?types] _]
+    (exec state-seq-m
+      [=type (return-all ?types)
+       _ (unify =type actual)]
+      true)
+
+    [[:complement ?type] _]
+    (fn [state]
+      (prn '[[:complement ?type] actual]
+           [[:complement ?type] actual]
+           (count ((unify ?type actual) state)))
+      (let [;; results-1 ((unify ?type actual) state)
+            ;; results-2 ((unify actual ?type) state)
+            ]
+        ;; (prn '[[:complement ?type] _] 'results results)
+        (if (and (empty? ((unify ?type actual) state))
+                 (empty? ((unify actual ?type) state)))
+          (list [state true])
+          (zero nil))))
+
     :else
     zero
     ))
@@ -262,17 +283,29 @@
     [:union ?types]
     (exec state-seq-m
       [=type (return-all ?types)
-       _ (parallel [(unify +falsey+ =type)
-                    (unify +truthy+ =type)
+       _ (parallel [(unify +truthy+ =type)
+                    (unify +falsey+ =type)
                     (unify +ambiguous+ =type)])
        _ (update-local local =type)]
-      =type)))
+      =type)
+    
+    [:object 'java.lang.Boolean []]
+    (exec state-seq-m
+      [=type (return-all (list [:literal java.lang.Boolean true]
+                               [:literal java.lang.Boolean false]))
+       _ (update-local local =type)]
+      =type)
+
+    :else
+    (return state-seq-m type)
+    ))
 
 (defn refine [type-check form]
-  ;; (prn 'refine form)
+  (prn 'refine form)
   (exec state-seq-m
     [=form (type-check form)
-     ;; :let [_ (prn 'refine/=form =form)]
+     state get-state
+     :let [_ (prn 'refine/=form =form 'state state)]
      =form (match =form
              [:bound local]
              (exec state-seq-m
@@ -281,7 +314,10 @@
                 =type (refine-local local =type)
                 ;; :let [_ (prn '(refine-local local =form) =type)]
                 ]
-               =form))]
+               =form)
+
+             :else
+             (return state-seq-m =form))]
     =form))
 
 (defn clean [type]
@@ -413,35 +449,72 @@
           [:all (vec used-vars) arity*]))
       )))
 
-(defn classify [refinements outputs]
-  (if (empty? refinements)
+(defn classify [worlds]
+  (if (empty? worlds)
     zero
-    (let [[[state [_ ?id] :as ref1] & others] refinements
+    (let [[[state type :as world] & others] worlds
           [take leave] (reduce (fn [[take leave] [state* _ :as pair]]
-                                 (if (= (update-in state [:mapping/locals] dissoc ?id)
-                                        (update-in state* [:mapping/locals] dissoc ?id))
+                                 (if (= state state*)
                                    [(conj take pair) leave]
                                    [take (conj leave pair)]))
-                               [[] []]
-                               others)
-          all-to-take (cons ref1 take)
-          ;; _ (prn 'all-to-take all-to-take)
-          [taken-pairs left-pairs] (reduce (fn [[take leave] [state* =output :as pair]]
-                                             (if (some (partial = state) (map first all-to-take))
-                                               [(conj take pair) leave]
-                                               [take (conj leave pair)]))
-                                           [[] []]
-                                           outputs)
-          clean-comp (exec state-seq-m
-                       [=type (spread taken-pairs)
-                        =type (clean-env #{?id} =type)]
-                       =type)
-          ;; _ (prn 'taken-pairs taken-pairs)
-          ;; _ (prn 'left-pairs left-pairs)
-          ;; _ (prn '(clean-comp %) (clean-comp state))
-          ]
-      (parallel [#(list [% [:union (map second (clean-comp %))]])
-                 (classify leave left-pairs)]))))
+                               [[world] []]
+                               others)]
+      #(let [classification (if (= 1 (count take))
+                              (list [% type])
+                              (list [% [:union (map second take)]]))]
+         (concat classification ((classify leave) %))))))
+
+;; (defn classify [refinements outputs]
+;;   (if (empty? refinements)
+;;     zero
+;;     (let [[[state [_ ?id] :as ref1] & others] refinements
+;;           [take leave] (reduce (fn [[take leave] [state* _ :as pair]]
+;;                                  (if (= (update-in state [:mapping/locals] dissoc ?id)
+;;                                         (update-in state* [:mapping/locals] dissoc ?id))
+;;                                    [(conj take pair) leave]
+;;                                    [take (conj leave pair)]))
+;;                                [[] []]
+;;                                others)
+;;           all-to-take (cons ref1 take)
+;;           ;; _ (prn 'all-to-take all-to-take)
+;;           [taken-pairs left-pairs] (reduce (fn [[take leave] [state* =output :as pair]]
+;;                                              (if (some (partial = state) (map first all-to-take))
+;;                                                [(conj take pair) leave]
+;;                                                [take (conj leave pair)]))
+;;                                            [[] []]
+;;                                            outputs)
+;;           clean-comp (exec state-seq-m
+;;                        [=type (spread taken-pairs)
+;;                         =type (clean-env #{?id} =type)]
+;;                        =type)
+;;           ;; _ (prn 'taken-pairs taken-pairs)
+;;           ;; _ (prn 'left-pairs left-pairs)
+;;           ;; _ (prn '(clean-comp %) (clean-comp state))
+;;           ]
+;;       (parallel [#(if-let [types (seq (map second (clean-comp %)))]
+;;                     (list [% [:union types]])
+;;                     (zero nil))
+;;                  (classify leave left-pairs)]))))
+
+(defn merge-arities [worlds]
+  (if (empty? worlds)
+    zero
+    (let [[[state arity :as world] & others] worlds
+          [taken left] (reduce (fn [[taken left] [state* arity* :as world*]]
+                                 (match [arity arity*]
+                                   [[:arity ?args ?body] [:arity ?args* ?body*]]
+                                   (if (= ?args ?args*)
+                                     [(conj taken world*) left]
+                                     [taken (conj left world*)])))
+                               [[world] []]
+                               others)]
+      (fn [state]
+        (let [batch (if (= 1 (count taken))
+                      (list [state (-> taken first (nth 1))])
+                      (list [state (let [returns [:union (map #(-> % (nth 1) (nth 2)) taken)]]
+                                     (-> taken first (nth 1) (assoc-in [2] returns)))]))]
+          (concat batch ((merge-arities left) state))))
+      )))
 
 (defn type-check [form]
   ;; (prn 'type-check form)
@@ -528,35 +601,58 @@
 
     [:form/if ?test ?then ?else]
     (exec state-seq-m
-      [;; =test (refine type-check ?test)
-       refinements (collect (refine type-check ?test))
-       outputs (collect (exec state-seq-m
-                          [=test (spread refinements)
-                           =output (parallel [(exec state-seq-m
-                                                [_ (unify +truthy+ =test)
-                                                 =then (type-check ?then)
-                                                 ;; :let [_ (prn ':form/if '=then =then)]
-                                                 ]
-                                                =then)
-                                              (exec state-seq-m
-                                                [_ (unify +falsey+ =test)
-                                                 =else (type-check ?else)
-                                                 ;; :let [_ (prn ':form/if '=else =else)]
-                                                 ]
-                                                =else)
-                                              (exec state-seq-m
-                                                [_ (unify +ambiguous+ =test)
-                                                 =then (type-check ?then)
-                                                 =else (type-check ?else)
-                                                 ;; :let [_ (prn ':form/if '=then =then '=else =else)]
-                                                 ]
-                                                [:union (list =then =else)])])]
-                          =output))
-       ;; :let [_ (prn 'refinements refinements)
-       ;;       _ (prn 'outputs outputs)
-       ;;       _ (prn '(classify refinements outputs) (classify refinements outputs))]
-       =output (classify refinements outputs)]
+      [=test (refine type-check ?test)
+       =output (parallel [(exec state-seq-m
+                            [_ (unify +truthy+ =test)
+                             =then (type-check ?then)
+                             ;; :let [_ (prn ':form/if '=then =then)]
+                             ]
+                            =then)
+                          (exec state-seq-m
+                            [_ (unify +falsey+ =test)
+                             =else (type-check ?else)
+                             ;; :let [_ (prn ':form/if '=else =else)]
+                             ]
+                            =else)
+                          (exec state-seq-m
+                            [_ (unify +ambiguous+ =test)
+                             =then (type-check ?then)
+                             =else (type-check ?else)
+                             ;; :let [_ (prn ':form/if '=then =then '=else =else)]
+                             ]
+                            [:union (list =then =else)])])]
       =output)
+    ;; (exec state-seq-m
+    ;;   [;; =test (refine type-check ?test)
+    ;;    refinements (collect (refine type-check ?test))
+    ;;    outputs (collect (exec state-seq-m
+    ;;                       [=test (spread refinements)
+    ;;                        =output (parallel [(exec state-seq-m
+    ;;                                             [_ (unify +truthy+ =test)
+    ;;                                              =then (type-check ?then)
+    ;;                                              ;; :let [_ (prn ':form/if '=then =then)]
+    ;;                                              ]
+    ;;                                             =then)
+    ;;                                           (exec state-seq-m
+    ;;                                             [_ (unify +falsey+ =test)
+    ;;                                              =else (type-check ?else)
+    ;;                                              ;; :let [_ (prn ':form/if '=else =else)]
+    ;;                                              ]
+    ;;                                             =else)
+    ;;                                           (exec state-seq-m
+    ;;                                             [_ (unify +ambiguous+ =test)
+    ;;                                              =then (type-check ?then)
+    ;;                                              =else (type-check ?else)
+    ;;                                              ;; :let [_ (prn ':form/if '=then =then '=else =else)]
+    ;;                                              ]
+    ;;                                             [:union (list =then =else)])])
+    ;;                        :let [_ (prn '=output =output)]]
+    ;;                       =output))
+    ;;    ;; :let [_ (prn 'refinements refinements)
+    ;;    ;;       _ (prn 'outputs outputs)
+    ;;    ;;       _ (prn '(classify refinements outputs) (classify refinements outputs))]
+    ;;    =output (classify refinements outputs)]
+    ;;   =output)
 
     [:form/def ?var]
     (exec state-seq-m
@@ -578,30 +674,75 @@
 
     [:form/fn ?local-name ?args ?body]
     (exec state-seq-m
-      [=fn fresh-type-var
-       $fn (bind-local ?local-name =fn)
-       =args (map-m state-seq-m
-                    (fn [arg]
-                      (exec state-seq-m
-                        [=arg fresh-type-var
-                         $arg (bind-local arg =arg)]
-                        =arg))
-                    ?args)
-       =body (type-check `[:form/do ~@?body])
-       =body (reduce-m state-seq-m
-                       (fn [=body =args]
-                         (exec state-seq-m
-                           [=clean (exit-env =body)]
-                           =clean))
-                       =body
-                       =args)
-       ;; _ (map-m state-seq-m (fn [_] unbind-local) =args)
-       =body (exit-env =body)
-       =arity (generalize-arity [:arity =args =body])]
-      (if (= :all (first =arity))
-        (let [[_ ?vars ?body] =arity]
-          [:all ?vars [:function (list ?body)]])
-        [:function (list =arity)]))
+      [worlds (collect (exec state-seq-m
+                         [=fn fresh-type-var
+                          $fn (bind-local ?local-name =fn)
+                          =args (map-m state-seq-m
+                                       (fn [arg]
+                                         (exec state-seq-m
+                                           [=arg fresh-type-var
+                                            $arg (bind-local arg =arg)]
+                                           =arg))
+                                       ?args)
+                          ;; all-returns (collect (type-check `[:form/do ~@?body]))
+                          =body (type-check `[:form/do ~@?body]) ;; (classify all-returns)
+                          :let [_ (prn '=body =body)]
+                          =body (reduce-m state-seq-m
+                                          (fn [=body =args]
+                                            (exec state-seq-m
+                                              [=clean (exit-env =body)]
+                                              =clean))
+                                          =body
+                                          =args)
+                          :let [_ (prn '(exit-env =body) =body)]
+                          ;; _ (map-m state-seq-m (fn [_] unbind-local) =args)
+                          =body (exit-env =body)
+                          =arity (generalize-arity [:arity =args =body])]
+                         =arity))
+       =fn (case (count worlds)
+             0 zero
+             1 (spread worlds)
+             ;; else
+             (exec state-seq-m
+               [arities (collect (merge-arities worlds))]
+               [:function (map second arities)]))]
+      =fn)
+    ;; (if (= :all (first =arity))
+    ;;   (let [[_ ?vars ?body] =arity]
+    ;;     [:all ?vars [:function (list ?body)]])
+    ;;   [:function (list =arity)])
+
+    ;; (exec state-seq-m
+    ;;   [;; =test (refine type-check ?test)
+    ;;    refinements (collect (refine type-check ?test))
+    ;;    outputs (collect (exec state-seq-m
+    ;;                       [=test (spread refinements)
+    ;;                        =output (parallel [(exec state-seq-m
+    ;;                                             [_ (unify +truthy+ =test)
+    ;;                                              =then (type-check ?then)
+    ;;                                              ;; :let [_ (prn ':form/if '=then =then)]
+    ;;                                              ]
+    ;;                                             =then)
+    ;;                                           (exec state-seq-m
+    ;;                                             [_ (unify +falsey+ =test)
+    ;;                                              =else (type-check ?else)
+    ;;                                              ;; :let [_ (prn ':form/if '=else =else)]
+    ;;                                              ]
+    ;;                                             =else)
+    ;;                                           (exec state-seq-m
+    ;;                                             [_ (unify +ambiguous+ =test)
+    ;;                                              =then (type-check ?then)
+    ;;                                              =else (type-check ?else)
+    ;;                                              ;; :let [_ (prn ':form/if '=then =then '=else =else)]
+    ;;                                              ]
+    ;;                                             [:union (list =then =else)])])
+    ;;                        :let [_ (prn '=output =output)]]
+    ;;                       =output))
+    ;;    ;; :let [_ (prn 'refinements refinements)
+    ;;    ;;       _ (prn 'outputs outputs)
+    ;;    ;;       _ (prn '(classify refinements outputs) (classify refinements outputs))]
+    ;;    =output (classify refinements outputs)]
+    ;;   =output)
 
     [:form/ann ?var ?type]
     (annotate ?var ?type)
@@ -618,11 +759,25 @@
     (exec state-seq-m
       [=fn (type-check ?fn)
        =args (map-m state-seq-m type-check ?args)
-       =return (fn-call =fn =args)]
+       =return (fn [state]
+                 (let [returns ((fn-call =fn =args) state)]
+                   (prn 'returns returns)
+                   returns))]
       =return)
     ))
 
-(defn ^:private parse-arity [type-def]
+(defn type-check-full [form]
+  (fn [state]
+    (let [results ((type-check form) state)]
+      (case (count results)
+        0 '()
+        1 (list [state (-> results first (nth 1))])
+        ;; else
+        (list [state [:union (map second ((type-check form) state))]])
+        ))
+    ))
+
+(defn ^:private parse-arity [parse-type-def type-def]
   (match type-def
     [& ?parts]
     (let [[args [_ return]] (split-with (partial not= '->) ?parts)]
@@ -632,19 +787,51 @@
   (match type-def
     nil
     [:nil]
+
+    (?value :guard (partial instance? java.lang.Boolean))
+    [:literal 'java.lang.Boolean ?value]
+
+    (?value :guard (partial instance? clojure.lang.BigInt))
+    [:literal 'clojure.lang.BigInt ?value]
+
+    (?value :guard (partial instance? java.math.BigDecimal))
+    [:literal 'java.math.BigDecimal ?value]
+
+    (?value :guard integer?)
+    [:literal 'java.lang.Long ?value]
+
+    (?value :guard float?)
+    [:literal 'java.lang.Double ?value]
+
+    (?value :guard ratio?)
+    [:literal 'clojure.lang.Ratio ?value]
+    
+    (?value :guard (partial instance? java.lang.Character))
+    [:literal 'java.lang.Character ?value]
+
+    (?value :guard string?)
+    [:literal 'java.lang.String ?value]
+
+    (?value :guard (partial instance? java.util.regex.Pattern))
+    [:literal 'java.util.regex.Pattern ?value]
+
+    (?value :guard keyword?)
+    [:literal 'clojure.lang.Keyword ?value]
     
     (['Or & ?params] :seq)
     `[:union ~(mapv parse-type-def ?params)]
+
+    (['Not ?inner] :seq)
+    [:complement (parse-type-def ?inner)]
     
     (?name :guard symbol?)
     [:object ?name []]
     
-    
     [& ?parts]
-    [:function (list (parse-arity type-def))]
+    [:function (list (parse-arity parse-type-def type-def))]
 
     (['Fn & ?arities] :seq)
-    [:function (map parse-arity ?arities)]
+    [:function (map (partial parse-arity parse-type-def) ?arities)]
     ))
 
 (defn type-ctor? [x]
@@ -756,6 +943,7 @@
                                ?class
                                `(~?class ~@(map type->code ?params)))
     [:union ?types] `(~'Or ~@(map type->code ?types))
+    [:complement ?tyoe] `(~'Not ~(type->code ?tyoe))
     [:arity ?args ?return] `[~@(map type->code ?args) ~'-> ~(type->code ?return)]
     [:function ?arities] (if (= 1 (count ?arities))
                            (type->code (first ?arities))
@@ -776,14 +964,18 @@
 
   
   
-  (time (do (defn run-type-checker [code]
-              (for [[_ type] ((-> code parse type-check) +default-context+)]
-                (doto (type->code type)
-                  (->> pr-str (println "Type:")))))
+  (time (do (defonce _init_
+              (do (alter-var-root #'clojure.core/prn
+                                  (constantly #(.println System/out (apply pr-str %&))))))
+          
+          (defn run-type-checker [code]
+            (for [[_ type] ((-> code parse type-check-full) +default-context+)]
+              (doto (type->code type)
+                (->> pr-str (println "Type:")))))
           
           (do-template [<type> <form>]
             (assert (= '(<type>) (run-type-checker '<form>)))
-
+            
             nil
             nil
 
@@ -877,6 +1069,35 @@
                   (if result
                     result
                     "YOLO"))))
+
+            (Fn [clojure.lang.IPersistentMap -> :klk]
+                [(Not clojure.lang.IPersistentMap) -> "manito"])
+            (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
+                              [(Not clojure.lang.IPersistentMap) -> false]))
+              (fn foo [x]
+                (if (map? x)
+                  :klk
+                  "manito")))
+            
+            (Fn [clojure.lang.IPersistentMap -> :yolo]
+                [(Not clojure.lang.IPersistentMap) -> "lol"])
+            (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
+                              [(Not clojure.lang.IPersistentMap) -> false]))
+              (fn foo [x]
+                (let [? (map? x)]
+                  (if ?
+                    :yolo
+                    "lol"))))
+
+            (Fn [clojure.lang.IPersistentMap -> "manito"]
+                [(Not clojure.lang.IPersistentMap) -> :klk])
+            (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
+                              [(Not clojure.lang.IPersistentMap) -> false]))
+              (fn foo [x]
+                (let [x (if (map? x)
+                          "manito"
+                          :klk)]
+                  x)))
             )
           ))
 
@@ -884,35 +1105,59 @@
   ;; MISSING: throw, try, catch, finally
   ;; MISSING: loop, recur
   ;; MISSING: def(protocol|type|record)
+  ;; MISSING: class hierarchies
+  ;; MISSING: multimethods
+  ;; MISSING: records & tuples
+  ;; MISSING: gen-class
+  ;; MISSING: Java interop
+  ;; MISSING: binding
+  ;; MISSING: monitor-enter & monitor-leave
+  ;; MISSING: proxy & reify
+  ;; MISSING: case
+  ;; MISSING: ns management
+  ;; MISSING: treating objects as IFn (like keywords & maps)
 
-  (Fn [clojure.lang.IPersistentMap -> :klk]
-      [(Not clojure.lang.IPersistentMap) -> "manito"])
-  (run-type-checker '(do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
-                                       [(Not clojure.lang.IPersistentMap) -> false]))
-                       (fn [x]
-                         (if (map? x)
-                           :klk
-                           "manito"))))
-
-  
-
-  
-  
-
-  (do nil
-    (assert (= [:object 'clojure.lang.IPersistentList [[:nothing]]]
-               (try-form [:literal/list []]))))
+  ;; The one below is not supposed to type-check due to lack of
+  ;; coverage of type possibilities.
+  (run-type-checker '(do (ann get-object [-> java.lang.Object])
+                       (ann use-case (Fn [String -> :yolo]
+                                         [Integer -> :lol]
+                                         [Boolean -> :meme]))
+                       (fn foo []
+                         (use-case (get-object)))))
 
   ;; This is a valid way of implementing letfn using a macro...
-  ;; (let [(\ odd* [even x]
-  ;;        (if (= 0 x)
-  ;;          false
-  ;;          (even odd* x)))
-  ;;       (\ even* [odd x]
-  ;;        (if (= 0 x)
-  ;;          true
-  ;;          (odd even* x)))
-  ;;       odd (odd* even*)
-  ;;       even (even* odd*)])
+  ;; (let [odd* (fn [odd even]
+  ;;              (fn [x]
+  ;;                (if (= 0 x)
+  ;;                  false
+  ;;                  ((even odd even) (dec x)))))
+  ;;       even* (fn [odd even]
+  ;;               (fn [x]
+  ;;                 (if (= 0 x)
+  ;;                   true
+  ;;                   ((odd odd even) (dec x)))))
+  ;;       odd (odd* odd* even*)
+  ;;       even (even* odd* even*)]
+  ;;   (odd 21))
+  
+  ;; (def (** base exp)
+  ;;   (reduce * 1 (repeat base exp)))
 
+  ;; (class **
+  ;;   (execute [base exp]
+  ;;     (reduce * 1 (repeat base exp))))
+  
+  ;; (reify Function
+  ;;   (apply [self base]
+  ;;     (reify Function
+  ;;       (apply [self exp]
+  ;;         (.execute ** base exp)))))
+  
+  ;; (defprotocol Function
+  ;;   (apply [self x]))
+
+  ;; ($math 10 < x < (20 ** 5))
+
+  
   )
