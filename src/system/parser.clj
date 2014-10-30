@@ -6,6 +6,18 @@
                     [type :as &types])))
 
 ;; [Utils]
+(def ^:private atom?
+  (some-fn (partial instance? java.lang.Boolean)
+           (partial instance? clojure.lang.BigInt)
+           (partial instance? java.math.BigDecimal)
+           integer?
+           float?
+           ratio?
+           string?
+           (partial instance? java.util.regex.Pattern)
+           keyword?
+           nil?))
+
 (defn ^:private type-ctor? [x]
   (or (symbol? x)
       (and (seq? x)
@@ -167,6 +179,28 @@
       [*value (map-m state-seq-m parse ?value)]
       (return state-seq-m [::#set (set *value)]))
 
+    (['quote ?quoted] :seq)
+    (do (prn '?quoted ?quoted (seq? ?quoted) (atom? ?quoted))
+      (cond (symbol? ?quoted)
+            (return state-seq-m [::#symbol ?quoted])
+
+            (atom? ?quoted)
+            (parse ?quoted)
+
+            (seq? ?quoted)
+            (exec state-seq-m
+              [*elems (map-m state-seq-m parse (map (fn [x] `(quote ~x)) ?quoted))]
+              (return state-seq-m [::#list *elems]))
+            
+            (vector? ?quoted)
+            (parse (mapv (fn [x] `(quote ~x)) ?quoted))
+
+            (map? ?quoted)
+            (parse (into {} (map (fn [[k v]] [`(quote ~k) `(quote ~v)]) ?quoted)))
+
+            (set? ?quoted)
+            (parse (seq (map (fn [x] `(quote ~x)) ?quoted)))))
+    
     (['do & ?forms] :seq)
     (exec state-seq-m
       [*forms (map-m state-seq-m parse ?forms)]

@@ -282,7 +282,7 @@
       (check-arity =arity =args))))
 
 (defn check* [form]
-  ;; (prn 'check* form)
+  (prn 'check* form)
   (match form
     [::&parser/#nil]
     (return state-seq-m [::&type/nil])
@@ -317,6 +317,16 @@
     [::&parser/#keyword ?value]
     (return state-seq-m [::&type/literal 'clojure.lang.Keyword ?value])
 
+    [::&parser/#symbol ?value]
+    (return state-seq-m [::&type/literal 'clojure.lang.Symbol ?value])
+
+    [::&parser/#list ?value]
+    (if (empty? ?value)
+      (return state-seq-m [::&type/object 'clojure.lang.PersistentList [[::&type/nothing]]])
+      (exec state-seq-m
+        [=members (map-m state-seq-m check* ?value)]
+        (return state-seq-m [::&type/object 'clojure.lang.PersistentList [[::&type/union =members]]])))
+    
     [::&parser/#vector ?value]
     (if (empty? ?value)
       (return state-seq-m [::&type/object 'clojure.lang.IPersistentVector [[::&type/nothing]]])

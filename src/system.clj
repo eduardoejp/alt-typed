@@ -159,19 +159,14 @@
               (ann foo [java.lang.Object -> java.lang.Object])
               (foo "bar"))
 
-            (Fn [1 -> "YOLO"]
-                ["2" -> "LOL"]
-                [:3 -> "MEME"])
+            (Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"])
             (fn case-test [x]
               (case x
                 1   "YOLO"
                 "2" "LOL"
                 :3  "MEME"))
             
-            (Fn [1 -> "YOLO"]
-                ["2" -> "LOL"]
-                [:3 -> "MEME"]
-                [Any -> "default"])
+            (Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"] [Any -> "default"])
             (fn case-test [x]
               (case x
                 1   "YOLO"
@@ -179,16 +174,19 @@
                 :3  "MEME"
                 "default"))
 
-            (Fn [(Or 1 2 3) -> "YOLO"]
-                ["2" -> "LOL"]
-                [:3 -> "MEME"]
-                [Any -> "default"])
+            (Fn [(Or 1 2 3) -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"] [Any -> "default"])
             (fn case-test [x]
               (case x
                 (1 2 3)   "YOLO"
                 "2" "LOL"
                 :3  "MEME"
                 "default"))
+
+            yolo
+            'yolo
+
+            (clojure.lang.PersistentList (Or 1 dos "tres"))
+            '(1 dos "tres")
             )))
 
   (run '(do (ann-class String [Object])
@@ -201,6 +199,8 @@
 
   (run '(do (ann ex-info [java.lang.String (clojure.lang.IPersistentMap Any Any) -> java.lang.Exception])
           (throw (ex-info "YOLO" {}))))
+
+  (run ''(1 dos "tres"))
 
   
 
@@ -216,7 +216,6 @@
   ;; MISSING: records & tuples
   
   ;; MISSING: treating objects as IFn (like keywords & maps)
-  ;; MISSING: quote
   
   ;; MISSING: def(protocol|type|record)
   ;; MISSING: proxy & reify
@@ -226,6 +225,9 @@
 
   ;; MISSING: prelude
   ;; MISSING: gen-class
+
+  ;; MISSING: Union generation
+  ;; MISSING: Intersection generation
   
 
   ;; The one below is not supposed to type-check due to lack of
