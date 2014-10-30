@@ -1,0 +1,238 @@
+(ns system.parser
+  (:require [clojure.core.match :refer [match]]
+            (system [util :as &util :refer [state-seq-m exec
+                                            map-m reduce-m
+                                            zero return return-all]]
+                    [type :as &types])))
+
+;; [Utils]
+(defn ^:private type-ctor? [x]
+  (or (symbol? x)
+      (and (seq? x)
+           (>= (count x) 2))))
+
+(defn ^:private parse-type-ctor [ctor]
+  (if (symbol? ctor)
+    [ctor []]
+    [(first ctor) (mapv parse-type-ctor (rest ctor))]))
+
+(defn ^:private parse-arity [parse-type-def type-def]
+  ;; (prn 'parse-arity type-def)
+  (match type-def
+    [& ?parts]
+    (let [[args [_ return]] (split-with (partial not= '->) ?parts)]
+      (exec state-seq-m
+        [;; :let [_ (prn '[args return] [args return])]
+         *args (map-m state-seq-m parse-type-def args)
+         ;; :let [_ (prn '*args *args)]
+         *return (parse-type-def return)
+         ;; :let [_ (prn '*return *return)]
+         ]
+        (&util/return state-seq-m [::&types/arity *args *return])))))
+
+(defn ^:private parse-type-def [type-def]
+  ;; (prn 'parse-type-def type-def)
+  (match type-def
+    nil
+    (return state-seq-m [::&types/nil])
+
+    (?value :guard (partial instance? java.lang.Boolean))
+    (return state-seq-m [::&types/literal 'java.lang.Boolean ?value])
+
+    (?value :guard (partial instance? clojure.lang.BigInt))
+    (return state-seq-m [::&types/literal 'clojure.lang.BigInt ?value])
+
+    (?value :guard (partial instance? java.math.BigDecimal))
+    (return state-seq-m [::&types/literal 'java.math.BigDecimal ?value])
+
+    (?value :guard integer?)
+    (return state-seq-m [::&types/literal 'java.lang.Long ?value])
+
+    (?value :guard float?)
+    (return state-seq-m [::&types/literal 'java.lang.Double ?value])
+
+    (?value :guard ratio?)
+    (return state-seq-m [::&types/literal 'clojure.lang.Ratio ?value])
+    
+    (?value :guard (partial instance? java.lang.Character))
+    (return state-seq-m [::&types/literal 'java.lang.Character ?value])
+
+    (?value :guard string?)
+    (return state-seq-m [::&types/literal 'java.lang.String ?value])
+
+    (?value :guard (partial instance? java.util.regex.Pattern))
+    (return state-seq-m [::&types/literal 'java.util.regex.Pattern ?value])
+
+    (?value :guard keyword?)
+    (return state-seq-m [::&types/literal 'clojure.lang.Keyword ?value])
+    
+    (['Or & ?params] :seq)
+    (exec state-seq-m
+      [*types (map-m state-seq-m parse-type-def ?params)]
+      (return state-seq-m [::&types/union (vec *types)]))
+
+    (['Not ?inner] :seq)
+    (exec state-seq-m
+      [*inner (parse-type-def ?inner)]
+      (return state-seq-m [::&types/complement *inner]))
+    
+    (?name :guard symbol?)
+    (do ;; (prn '(?name :guard symbol?) `(~?name :guard ~'symbol?))
+      (&util/with-field* :types
+        (&types/resolve ?name)))
+    
+    [& ?parts]
+    (do ;; (prn '[& ?parts])
+      (exec state-seq-m
+        [=arity (parse-arity parse-type-def type-def)
+         ;; :let [_ (prn '=arity =arity)]
+         ]
+        (return state-seq-m [::&types/function (list =arity)])))
+
+    (['Fn & ?arities] :seq)
+    (exec state-seq-m
+      [=arities (map-m state-seq-m (partial parse-arity parse-type-def) ?arities)]
+      (return state-seq-m [::&types/function (vec =arities)]))
+
+    ([?fn & ?params] :seq)
+    (do ;; (prn '[?fn & ?params] [?fn ?params])
+      (exec state-seq-m
+        [=type-fn (do (prn '?fn ?fn)
+                    (&util/with-field* :types
+                      (&types/resolve ?fn)))
+         ;; :let [_ (prn '=type-fn =type-fn)]
+         =params (map-m state-seq-m parse-type-def ?params)
+         ;; :let [_ (prn '=params =params)]
+         ]
+        (&types/fn-call =type-fn =params)))
+    
+    ;; :else
+    ;; (do (prn 'parse-type-def/else)
+    ;;   zero)
+    ))
+
+;; Functions
+(defn parse [code]
+  ;; (prn 'parse code)
+  (match code
+    nil
+    (return state-seq-m [::#nil])
+    
+    (?value :guard (partial instance? java.lang.Boolean))
+    (return state-seq-m [::#boolean ?value])
+
+    (?value :guard (partial instance? clojure.lang.BigInt))
+    (return state-seq-m [::#big-int ?value])
+
+    (?value :guard (partial instance? java.math.BigDecimal))
+    (return state-seq-m [::#big-decimal ?value])
+
+    (?value :guard integer?)
+    (return state-seq-m [::#integer ?value])
+
+    (?value :guard float?)
+    (return state-seq-m [::#real ?value])
+
+    (?value :guard ratio?)
+    (return state-seq-m [::#ratio ?value])
+    
+    (?value :guard (partial instance? java.lang.Character))
+    (return state-seq-m [::#character ?value])
+
+    (?value :guard string?)
+    (return state-seq-m [::#string ?value])
+
+    (?value :guard (partial instance? java.util.regex.Pattern))
+    (return state-seq-m [::#regex ?value])
+
+    (?value :guard keyword?)
+    (return state-seq-m [::#keyword ?value])
+
+    (?value :guard symbol?)
+    (return state-seq-m [::symbol ?value])
+
+    (?value :guard vector?)
+    (exec state-seq-m
+      [*value (map-m state-seq-m parse ?value)]
+      (return state-seq-m [::#vector (vec *value)]))
+    
+    (?value :guard map?)
+    (exec state-seq-m
+      [*key (map-m state-seq-m parse (keys ?value))
+       *value (map-m state-seq-m parse (vals ?value))]
+      (return state-seq-m [::#map (into {} (map vector *key *value))]))
+    
+    (?value :guard set?)
+    (exec state-seq-m
+      [*value (map-m state-seq-m parse ?value)]
+      (return state-seq-m [::#set (set *value)]))
+
+    (['do & ?forms] :seq)
+    (exec state-seq-m
+      [*forms (map-m state-seq-m parse ?forms)]
+      (return state-seq-m `[::do ~@*forms]))
+
+    (['let (?bindings :guard vector?) & ?body] :seq)
+    (do (assert (even? (count ?bindings)) "LET must have an even number of elements.")
+      (exec state-seq-m
+        [*bindings (map-m state-seq-m
+                          (fn [[?label ?value]]
+                            (exec state-seq-m
+                              [*value (parse ?value)]
+                              (return state-seq-m [?label *value])))
+                          (partition 2 ?bindings))
+         *body (map-m state-seq-m parse ?body)]
+        (return state-seq-m [::let *bindings `[::do ~@*body]])))
+
+    (['if ?test ?then & [?else]] :seq)
+    (exec state-seq-m
+      [*test (parse ?test)
+       *then (parse ?then)
+       *else (parse ?else)]
+      (return state-seq-m [::if *test *then *else]))
+    
+    (['def (?var :guard symbol?)] :seq)
+    (return state-seq-m [::def ?var])
+    
+    (['def (?var :guard symbol?) ?value] :seq)
+    (exec state-seq-m
+      [*value (parse ?value)]
+      (return state-seq-m [::def ?var *value]))
+
+    (['var (?var :guard symbol?)] :seq)
+    (return state-seq-m [::var ?var])
+
+    (['ann (?var :guard symbol?) ?type-def] :seq)
+    (do ;; (prn `[~'ann ~?var ~?type-def])
+      (exec state-seq-m
+        [*type-def (parse-type-def ?type-def)
+         ;; :let [_ (prn '*type-def *type-def)]
+         ]
+        (return state-seq-m [::ann ?var *type-def])))
+
+    (['ann-class (?class :guard type-ctor?) (?parents :guard (every-pred vector? (partial every? type-ctor?)))] :seq)
+    (exec state-seq-m
+      [:let [*type-ctor (parse-type-ctor ?class)
+             ;; _ (prn '*type-ctor *type-ctor)
+             *parents (map parse-type-ctor ?parents)
+             ;; _ (prn '*parents *parents)
+             ]]
+      (return state-seq-m [::ann-class *type-ctor (vec *parents)]))
+
+    (['defalias (?ctor :guard type-ctor?) ?type-def] :seq)
+    (let [[name args] (if (symbol? ?ctor)
+                        [?ctor []]
+                        [(first ?ctor) (rest ?ctor)])]
+      (return state-seq-m [::defalias name args (parse-type-def ?type-def)]))
+
+    (['fn ?local-name (?args :guard vector?) & ?body] :seq)
+    (exec state-seq-m
+      [*body (map-m state-seq-m parse ?body)]
+      (return state-seq-m [::fn ?local-name ?args *body]))
+
+    ([?fn & ?args] :seq)
+    (exec state-seq-m
+      [*fn (parse ?fn)
+       *args (map-m state-seq-m parse ?args)]
+      (return state-seq-m [::fn-call *fn *args]))
+    ))

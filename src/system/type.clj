@@ -1,0 +1,233 @@
+(ns system.type
+  (:refer-clojure :exclude [resolve])
+  (:require [clojure.core.match :refer [match]]
+            (system [util :as &util :refer [state-seq-m exec
+                                            map-m reduce-m
+                                            zero return return-all]])))
+
+;; [Data]
+(defrecord TypeVars [counter mappings])
+(defrecord BoundTypes [counter mappings])
+(defrecord Types [db vars bound class-hierarchy])
+
+;; [Utils]
+(defn ^:private defined? [hierarchy class]
+  (let [class (symbol "java::class" (name class))]
+    (boolean (or (get-in hierarchy [:parents class])
+                 (get-in hierarchy [:descendants class])))))
+
+;; [Interface]
+;; Monads / vars
+(def fresh-var
+  (fn [^Types state]
+    (let [id (-> state ^TypeVars (.-vars) .-counter)]
+      (list [(-> state
+                 (update-in [:vars :counter] inc)
+                 (assoc-in [:vars :mappings id] (vector [::any] [::nothing])))
+             [::var id]]))))
+
+(defn deref-var [type-var]
+  (match type-var
+    [::var ?id]
+    (fn [^Types state]
+      (when-let [top+bottom (-> state ^TypeVars (.-vars) .-mappings (get ?id))]
+        (list [state top+bottom])))))
+
+(defn deref-binding [binding]
+  (match binding
+    [::bound ?id]
+    (fn [^Types state]
+      ;; (prn 'deref-binding binding state)
+      (when-let [=type (-> state ^BoundTypes (.-bound) .-mappings (get ?id))]
+        (list [state =type])))))
+
+(defn update-var [type-var top bottom]
+  (match type-var
+    [::var ?id]
+    (fn [^Types state]
+      (if (-> state ^TypeVars (.-vars) .-mappings (get ?id))
+        (list [(assoc-in state [:vars :mappings ?id] [top bottom]) nil])))
+    ))
+
+(defn update-binding [binding type]
+  (match binding
+    [::bound ?id]
+    (fn [state]
+      (list [(assoc-in state [:bound :mappings ?id] type) nil]))))
+
+;; Monads / bound type-vars
+(defn bind [type]
+  (fn [^Types state]
+    (let [id (-> state ^BoundTypes (.-bound) .-counter)]
+      (list [(-> state
+                 (update-in [:bound :counter] inc)
+                 (assoc-in [:bound :mappings id] type))
+             [::bound id]]))))
+
+(defn unbind [id]
+  (fn [^Types state]
+    (list [(update-in state [:bound :mappings] dissoc id) nil])))
+
+;; Monads / DB
+(defn define-type [type-name type-def]
+  (fn [^Types state]
+    (when (not (-> state .-db (contains? type-name)))
+      (list [(assoc-in state [:db type-name] type-def) nil]))))
+
+(defn resolve [type-name]
+  (fn [^Types state]
+    ;; (prn `resolve type-name state)
+    (when-let [type (or (-> state .-db (get type-name))
+                        [::object type-name []])]
+      (list [state type]))))
+
+;; Monads / Classes
+(defn define-class [class parents]
+  (fn [^Types state]
+    ;; (prn '(defined? (.-class-hierarchy state) (nth class 0)) (defined? (.-class-hierarchy state) (nth class 0)))
+    (when (not (defined? (.-class-hierarchy state) (nth class 0)))
+      (let [class-name (symbol "java::class" (name (nth class 0)))
+            ;; _ (prn 'parents parents '(map first parents) (map first parents))
+            hierarchy* (reduce #(derive %1 class-name (symbol "java::class" (name %2)))
+                               (.-class-hierarchy state)
+                               (map first parents))]
+        ;; (prn '(.-class-hierarchy state) (.-class-hierarchy state))
+        ;; (prn 'hierarchy* hierarchy*)
+        (list [(assoc state :hierarchy hierarchy*) nil])
+        ))
+    ))
+
+(defn super-class? [super sub]
+  ;; (prn 'super-class? super sub)
+  (fn [^Types state]
+    ;; (prn 'super-class?/state state)
+    (let [hierarchy (.-class-hierarchy state)]
+      ;; (prn 'super-class?
+      ;;      (defined? hierarchy super)
+      ;;      (defined? hierarchy sub)
+      ;;      (isa? hierarchy (symbol "java::class" (name super)) (symbol "java::class" (name sub)))
+      ;;      hierarchy)
+      (list [state (or (and (defined? hierarchy super)
+                            (defined? hierarchy sub)
+                            (isa? hierarchy (symbol "java::class" (name super)) (symbol "java::class" (name sub))))
+                       true)]))))
+
+;; Monads / Solving
+(defn solve [expected actual]
+  ;; (prn 'solve expected actual)
+  (match [expected actual]
+    [_ [::bound _]]
+    (exec state-seq-m
+      [=type (deref-binding actual)
+       _ (solve expected =type)]
+      (return state-seq-m true))
+
+    [_ [::var _]]
+    (exec state-seq-m
+      [[=top =bottom] (deref-var actual)
+       _ (&util/parallel [(solve expected =top)
+                          (exec state-seq-m
+                            [_ (solve =top expected)
+                             _ (update-var actual expected =bottom)]
+                            (return state-seq-m true))])]
+      (return state-seq-m true))
+
+    [[::any] _]
+    (return state-seq-m true)
+
+    [_ [::nothing]]
+    (return state-seq-m true)
+
+    [[::nil] [::nil]]
+    (return state-seq-m true)
+
+    [[::literal ?e-class ?e-value] [::literal ?a-class ?a-value]]
+    (do ;; (prn '[[::literal _ _] [::literal _ _]] [expected actual]
+        ;;      `(~'= ~?e-class ~?a-class) (.equals ?e-class ?a-class)
+        ;;      `(~'= ~?e-value ~?a-value) (= ?e-value ?a-value)
+        ;;      (and (= ?e-class ?a-class)
+        ;;           (= ?e-value ?a-value)))
+        (if (and (= ?e-class ?a-class)
+                 (= ?e-value ?a-value))
+          (return state-seq-m true)
+          zero))
+
+    [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
+    (exec state-seq-m
+      [? (super-class? ?class ?lit-class)]
+      (if ?
+        (return state-seq-m true)
+        zero))
+
+    [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
+    (do (prn [::object ?e-class ?e-params] [::object ?a-class ?a-params])
+      (if (= ?e-class ?a-class)
+        (exec state-seq-m
+          [_ (map-m state-seq-m
+                    (fn [[e a]] (solve e a))
+                    (map vector ?e-params ?a-params))]
+          (return state-seq-m true))
+        zero))
+
+    [[::union ?types] _]
+    (exec state-seq-m
+      [=type (return-all ?types)
+       _ (solve =type actual)]
+      (return state-seq-m true))
+
+    [[::complement ?type] _]
+    (fn [state]
+      ;; (prn '[[::complement ?type] actual]
+      ;;      [[::complement ?type] actual]
+      ;;      (count ((solve ?type actual) state)))
+      (let [;; results-1 ((solve ?type actual) state)
+            ;; results-2 ((solve actual ?type) state)
+            ]
+        ;; (prn '[[:complement ?type] _] 'results results)
+        (if (and (empty? ((solve ?type actual) state))
+                 (empty? ((solve actual ?type) state)))
+          (list [state true])
+          (zero nil))))
+
+    :else
+    zero
+    ))
+
+;; Monads / Type-functions
+(defn ^:private realize [bindings type]
+  (match type
+    [::object ?class ?params]
+    (return state-seq-m [::object ?class (map realize ?params)])
+    
+    [::union ?types]
+    (return state-seq-m [::union (map realize ?types)])
+
+    [::complement ?type]
+    (return state-seq-m [::complement (realize ?type)])
+
+    (?token :guard symbol?)
+    (if-let [=var (get bindings ?token)]
+      =var
+      zero)
+    
+    :else
+    (return state-seq-m type)
+    ))
+
+(defn fn-call [type-fn params]
+  (match type-fn
+    [::all ?params ?type-def]
+    (when (= (count ?params) (count params))
+      (exec state-seq-m
+        [=vars (map-m state-seq-m (fn [_] fresh-var) ?params)
+         :let [pairs (map vector =vars params)]
+         _ (map-m state-seq-m (fn [[=var =input]] (solve =var =input)) pairs)]
+        (realize (into {} pairs) ?type-def)))
+    :else
+    zero))
+
+;; Constants
+(def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
+(def +truthy+ [::complement +falsey+])
+
+(def +init+ (Types. {} (TypeVars. 0 {}) (BoundTypes. 0 {}) (make-hierarchy)))
