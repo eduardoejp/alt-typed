@@ -190,6 +190,27 @@
        *then (parse ?then)
        *else (parse ?else)]
       (return state-seq-m [::if *test *then *else]))
+
+    (['case ?value & ?clauses] :seq)
+    (exec state-seq-m
+      [*value (parse ?value)
+       :let [[?clauses ?default] [(partition 2 ?clauses) (if (even? (count ?clauses))
+                                                           nil
+                                                           (last ?clauses))]
+             _ (prn '[?clauses ?default] [?clauses ?default])]
+       *clauses (map-m state-seq-m
+                       (fn [[?value ?form]]
+                         (exec state-seq-m
+                           [*value (if (seq? ?value)
+                                     (map-m state-seq-m parse ?value)
+                                     (parse ?value))
+                            *form (parse ?form)]
+                           (return state-seq-m [*value *form])))
+                       ?clauses)
+       *default (if ?default
+                  (parse ?default)
+                  (return state-seq-m nil))]
+      (return state-seq-m [::case *value *clauses *default]))
     
     (['def (?var :guard symbol?)] :seq)
     (return state-seq-m [::def ?var])

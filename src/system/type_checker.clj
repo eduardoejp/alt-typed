@@ -215,38 +215,36 @@
           (concat batch ((merge-arities left) state))))
       )))
 
-(defn ^:private refine-local [local type]
-  ;; (prn 'refine-local local type)
+(defn ^:private refine-local [types local type]
+  (prn 'refine-local types local type)
   (match type
     [::&type/union ?types]
     (exec state-seq-m
       [=type (return-all ?types)
-       _ (&util/parallel [(&util/with-field* :types
-                            (&type/solve &type/+truthy+ =type))
-                          (&util/with-field* :types
-                            (&type/solve &type/+falsey+ =type))
-                          (&util/with-field* :types
-                            (&type/solve [::&type/any] =type))])
+       _ (&util/parallel (mapv (fn [expected]
+                                 (&util/with-field* :types (&type/solve expected =type)))
+                               types))
        _ (&util/with-field* :types
            (&type/update-binding local =type))]
       (return state-seq-m =type))
     
-    [::&type/object 'java.lang.Boolean []]
-    (exec state-seq-m
-      [=type (return-all (list [::&type/literal java.lang.Boolean true]
-                               [::&type/literal java.lang.Boolean false]))
-       _ (&util/with-field* :types
-           (&type/update-binding local =type))]
-      (return state-seq-m =type))
+    ;; [::&type/object 'java.lang.Boolean []]
+    ;; (exec state-seq-m
+    ;;   [=type (return-all (list [::&type/literal java.lang.Boolean true]
+    ;;                            [::&type/literal java.lang.Boolean false]))
+    ;;    _ (&util/with-field* :types
+    ;;        (&type/update-binding local =type))]
+    ;;   (return state-seq-m =type))
 
     :else
     (return state-seq-m type)
     ))
 
-(defn ^:private refine [check* form]
-  ;; (prn 'refine form)
+(defn ^:private refine [check* types form]
+  (prn 'refine types form)
   (exec state-seq-m
     [=form (check* form)
+     :let [_ (prn 'refine/=form =form)]
      state &util/get-state
      ;; :let [_ (prn 'refine/=form =form 'state state)]
      _ (match =form
@@ -254,7 +252,7 @@
          (exec state-seq-m
            [=type (&util/with-field* :types
                     (&type/deref-binding =form))
-            _ (refine-local =form =type)]
+            _ (refine-local types =form =type)]
            (return state-seq-m true))
 
          :else
@@ -373,7 +371,7 @@
 
     [::&parser/if ?test ?then ?else]
     (exec state-seq-m
-      [=test (refine check* ?test)
+      [=test (refine check* [&type/+truthy+ &type/+falsey+ [::&type/any]] ?test)
        ;; :let [_ (prn ::&parser/if '=test =test)]
        ]
       (&util/parallel [(exec state-seq-m
@@ -397,6 +395,49 @@
                           ]
                          (return state-seq-m [::&type/union (list =then =else)]))]))
 
+    [::&parser/case ?value ?clauses ?default]
+    (exec state-seq-m
+      [:let [_ (prn '?clauses ?clauses)
+             _ (prn '?default ?default)]
+       =branches* (map-m state-seq-m
+                         (fn [[?test ?form]]
+                           (exec state-seq-m
+                             [:let [_ (prn '?test ?test)]
+                              =test (if (seq? ?test)
+                                      (exec state-seq-m
+                                        [?parts (map-m state-seq-m check* ?test)]
+                                        (return state-seq-m [::&type/union (vec ?parts)]))
+                                      (check* ?test))
+                              :let [_ (prn '=test =test)]]
+                             (return state-seq-m [=test ?form])))
+                         ?clauses)
+       :let [_ (prn '=branches* (mapv first =branches*) =branches*)]
+       =value (refine check* (mapv first =branches*) ?value)
+       :let [_ (prn '=value =value)]
+       =branch (&util/parallel* (let [main-branches (mapv (fn [[=test ?form]]
+                                                            (exec state-seq-m
+                                                              [=value+ (&util/with-field* :types
+                                                                         (exec state-seq-m
+                                                                           [=value (&type/deref-binding =value)]
+                                                                           (&type/deref-var =value)))
+                                                               :let [_ (prn '[=test =value] [=test =value+])]
+                                                               _ (&util/with-field* :types
+                                                                   (&type/solve =test =value))
+                                                               =form (check* ?form)
+                                                               :let [_ (prn '=form =form)]]
+                                                              (return state-seq-m =form)))
+                                                          =branches*)]
+                                  (if ?default
+                                    (conj main-branches
+                                          (check* ?default))
+                                    main-branches)))
+       :let [_ (prn '=branch =branch)]
+       ;; =default (check* ?default)
+       ]
+      ;; (return state-seq-m [::&type/union (conj (vec =branches) =default)])
+      ;; (return state-seq-m [::&type/union (vec =branches)])
+      (return state-seq-m =branch))
+
     [::&parser/def ?var]
     (exec state-seq-m
       [:let [=value [::&type/nothing]]
@@ -417,16 +458,19 @@
               (&env/resolve-var ?var))]
       (return state-seq-m [::&type/object 'clojure.lang.Var [=var]]))
 
-
     [::&parser/fn ?local-name ?args ?body]
     (exec state-seq-m
       [worlds (&util/collect (exec state-seq-m
                                [=fn (&util/with-field* :types
-                                      &type/fresh-var)
+                                      (exec state-seq-m
+                                        [=var &type/fresh-var]
+                                        (&type/bind =var)))
                                 =args (map-m state-seq-m
                                              (fn [arg]
                                                (&util/with-field* :types
-                                                 &type/fresh-var))
+                                                 (exec state-seq-m
+                                                   [=var &type/fresh-var]
+                                                   (&type/bind =var))))
                                              ?args)
                                 =return (with-env {?local-name =fn}
                                           (with-env (into {} (map vector ?args =args))

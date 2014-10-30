@@ -83,6 +83,10 @@
   (fn [state]
     (some identity (map #(seq (% state)) steps))))
 
+(defn parallel* [steps]
+  (fn [state]
+    (mapcat #(% state) steps)))
+
 (defn collect [step]
   #(list [% (step %)]))
 

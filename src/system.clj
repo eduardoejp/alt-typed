@@ -158,8 +158,38 @@
             (do (ann-class java.lang.String [java.lang.Object])
               (ann foo [java.lang.Object -> java.lang.Object])
               (foo "bar"))
-            )
-          ))
+
+            (Fn [1 -> "YOLO"]
+                ["2" -> "LOL"]
+                [:3 -> "MEME"])
+            (fn case-test [x]
+              (case x
+                1   "YOLO"
+                "2" "LOL"
+                :3  "MEME"))
+            
+            (Fn [1 -> "YOLO"]
+                ["2" -> "LOL"]
+                [:3 -> "MEME"]
+                [Any -> "default"])
+            (fn case-test [x]
+              (case x
+                1   "YOLO"
+                "2" "LOL"
+                :3  "MEME"
+                "default"))
+
+            (Fn [(Or 1 2 3) -> "YOLO"]
+                ["2" -> "LOL"]
+                [:3 -> "MEME"]
+                [Any -> "default"])
+            (fn case-test [x]
+              (case x
+                (1 2 3)   "YOLO"
+                "2" "LOL"
+                :3  "MEME"
+                "default"))
+            )))
 
   (run '(do (ann-class String [Object])
           (ann-class Integer [Object])
@@ -169,52 +199,15 @@
           (ann coll->str [(Collection (KV key val)) -> String])
           (coll->str (get-map))))
 
-  (do (defonce _init_
-        (do (alter-var-root #'clojure.core/prn
-                            (constantly #(.println System/out (apply pr-str %&))))))
-    
-    (defn run [code]
-      (println "Code:" (pr-str code))
-      (let [monad (exec state-seq-m
-                    [parsed-code (&parser/parse code)]
-                    (&type-checker/check parsed-code))
-            types (map (comp &translator/type->code second)
-                       (monad &type-checker/+init+))]
-        (doseq [type types]
-          (->> type pr-str (println "Type:")))
-        (println "")
-        types))
+  (run '(do (ann ex-info [java.lang.String (clojure.lang.IPersistentMap Any Any) -> java.lang.Exception])
+          (throw (ex-info "YOLO" {}))))
 
-    (run '(do (ann ex-info [java.lang.String (clojure.lang.IPersistentMap Any Any) -> java.lang.Exception])
-            (throw (ex-info "YOLO" {})))))
-
-  (do (defonce _init_
-        (do (alter-var-root #'clojure.core/prn
-                            (constantly #(.println System/out (apply pr-str %&))))))
-    
-    (defn run [code]
-      (println "Code:" (pr-str code))
-      (let [monad (exec state-seq-m
-                    [parsed-code (&parser/parse code)]
-                    (&type-checker/check parsed-code))
-            types (map (comp &translator/type->code second)
-                       (monad &type-checker/+init+))]
-        (doseq [type types]
-          (->> type pr-str (println "Type:")))
-        (println "")
-        types))
-
-    (run '(fn case-test [x]
-            (case x
-              1   "YOLO"
-              "2" "LOL"
-              :3  "MEME"))))
+  
 
   ;; MISSING: class conversions
   ;; MISSING: throw, try, catch, finally
   
   ;; MISSING: loop, recur
-  ;; MISSING: case
   
   ;; MISSING: Java interop
   ;; MISSING: binding
