@@ -117,11 +117,12 @@
       (list [state (or (and (defined? hierarchy super)
                             (defined? hierarchy sub)
                             (isa? hierarchy (symbol "java::class" (name super)) (symbol "java::class" (name sub))))
-                       true)]))))
+                       (or (= super sub)
+                           (= super 'java.lang.Object)))]))))
 
 ;; Monads / Solving
 (defn solve [expected actual]
-  ;; (prn 'solve expected actual)
+  (prn 'solve expected actual)
   (match [expected actual]
     [_ [::bound _]]
     (exec state-seq-m
@@ -234,7 +235,7 @@
     zero))
 
 ;; Monads / Types
-(do-template [<fn> <tag> <preferred> <LT> <GT>]
+(do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]
   (letfn [(adder [base addition]
             (match [base addition]
               [_ [<tag> ?addition]]
@@ -269,7 +270,10 @@
               [_ _]
               (&util/parallel [(exec state-seq-m
                                  [_ (solve base addition)]
-                                 (return state-seq-m <preferred>))
+                                 (return state-seq-m <LT-ret>))
+                               (exec state-seq-m
+                                 [_ (solve addition base)]
+                                 (return state-seq-m <GT-ret>))
                                (return state-seq-m [<tag> [base addition]])])
               ))]
     (defn <fn> [types]
@@ -281,8 +285,8 @@
         (reduce-m state-seq-m adder type others)
         )))
 
-  $or  ::union        base     :parent :child
-  $and ::intersection addition :child  :parent
+  $or  ::union        base     addition :parent :child
+  $and ::intersection addition base     :child  :parent
   )
 
 ;; (Or String Number) Long = (Or String Number)

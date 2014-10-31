@@ -195,7 +195,8 @@
       (fn [state]
         (let [batch (if (= 1 (count taken))
                       (list [state (-> taken first (nth 1))])
-                      (list [state (let [[[_ returns]] ((&type/$or (mapv #(-> % (nth 1) (nth 2)) taken)) state)]
+                      (list [state (let [[[_ returns]] ((&util/with-field* :types
+                                                          (&type/$or (mapv #(-> % (nth 1) (nth 2)) taken))) state)]
                                      (-> taken first (nth 1) (assoc-in [2] returns)))])
                       )]
           (concat batch ((merge-arities left) state))))
@@ -311,7 +312,8 @@
       (return state-seq-m [::&type/object 'clojure.lang.PersistentList [[::&type/nothing]]])
       (exec state-seq-m
         [=elems (map-m state-seq-m check* ?value)
-         =elems (&type/$or (vec =elems))]
+         =elems (&util/with-field* :types
+                  (&type/$or (vec =elems)))]
         (return state-seq-m [::&type/object 'clojure.lang.PersistentList [=elems]])))
     
     [::&parser/#vector ?value]
@@ -319,7 +321,8 @@
       (return state-seq-m [::&type/object 'clojure.lang.IPersistentVector [[::&type/nothing]]])
       (exec state-seq-m
         [=elems (map-m state-seq-m check* ?value)
-         =elems (&type/$or (vec =elems))]
+         =elems (&util/with-field* :types
+                  (&type/$or (vec =elems)))]
         (return state-seq-m [::&type/object 'clojure.lang.IPersistentVector [=elems]])))
 
     [::&parser/#map ?value]
@@ -333,8 +336,10 @@
                             =v (check* ?v)]
                            (return state-seq-m [=k =v])))
                        (seq ?value))
-         =k (&type/$or (mapv first =elems))
-         =v (&type/$or (mapv second =elems))]
+         =k (&util/with-field* :types
+              (&type/$or (mapv first =elems)))
+         =v (&util/with-field* :types
+              (&type/$or (mapv second =elems)))]
         (return state-seq-m [::&type/object 'clojure.lang.IPersistentMap [=k =v]])))
 
     [::&parser/#set ?value]
@@ -342,7 +347,8 @@
       (return state-seq-m [::&type/object 'clojure.lang.IPersistentSet [[::&type/nothing]]])
       (exec state-seq-m
         [=elems (map-m state-seq-m check* ?value)
-         =elems (&type/$or (vec =elems))]
+         =elems (&util/with-field* :types
+                  (&type/$or (vec =elems)))]
         (return state-seq-m [::&type/object 'clojure.lang.IPersistentSet [=elems]])))
     
     [::&parser/symbol ?symbol]
@@ -375,28 +381,35 @@
     [::&parser/if ?test ?then ?else]
     (exec state-seq-m
       [=test (refine check* [&type/+truthy+ &type/+falsey+ [::&type/any]] ?test)
-       ;; :let [_ (prn ::&parser/if '=test =test)]
+       ;; =test* (&util/with-field* :types
+       ;;          (&type/deref-binding =test))
+       ;; :let [_ (prn ::&parser/if '=test =test*)]
+       =return (&util/parallel [(exec state-seq-m
+                                  [_ (&util/with-field* :types
+                                       (&type/solve &type/+truthy+ =test))
+                                   ;; :let [_ (prn ::&parser/if 'THEN)]
+                                   ]
+                                  (check* ?then))
+                                (exec state-seq-m
+                                  [_ (&util/with-field* :types
+                                       (&type/solve &type/+falsey+ =test))
+                                   ;; :let [_ (prn ::&parser/if 'ELSE)]
+                                   ]
+                                  (check* ?else))
+                                (exec state-seq-m
+                                  [_ (&util/with-field* :types
+                                       (&type/solve [::&type/any] =test))
+                                   =then (check* ?then)
+                                   ;; =then* (&util/with-field* :types
+                                   ;;          (&type/deref-binding =then))
+                                   =else (check* ?else)
+                                   ;; :let [_ (prn ::&parser/if 'THEN+ELSE =then =then* =else)]
+                                   ]
+                                  (&util/with-field* :types
+                                    (&type/$or [=then =else])))])
+       ;; :let [_ (prn ::&parser/if '=return =return)]
        ]
-      (&util/parallel [(exec state-seq-m
-                         [_ (&util/with-field* :types
-                              (&type/solve &type/+truthy+ =test))
-                          ;; :let [_ (prn ::&parser/if 'THEN)]
-                          ]
-                         (check* ?then))
-                       (exec state-seq-m
-                         [_ (&util/with-field* :types
-                              (&type/solve &type/+falsey+ =test))
-                          ;; :let [_ (prn ::&parser/if 'ELSE)]
-                          ]
-                         (check* ?else))
-                       (exec state-seq-m
-                         [_ (&util/with-field* :types
-                              (&type/solve [::&type/any] =test))
-                          =then (check* ?then)
-                          =else (check* ?else)
-                          ;; :let [_ (prn ::&parser/if 'THEN+ELSE)]
-                          ]
-                         (&type/$or [=then =else]))]))
+      (return state-seq-m =return))
 
     [::&parser/case ?value ?clauses ?default]
     (exec state-seq-m
@@ -409,7 +422,8 @@
                               =test (if (seq? ?test)
                                       (exec state-seq-m
                                         [?parts (map-m state-seq-m check* ?test)]
-                                        (&type/$or (vec ?parts)))
+                                        (&util/with-field* :types
+                                          (&type/$or (vec ?parts))))
                                       (check* ?test))
                               :let [_ (prn '=test =test)]]
                              (return state-seq-m [=test ?form])))
@@ -532,5 +546,7 @@
        0 '()
        1 (list [% (-> results first (nth 1))])
        ;; else
-       ((&type/$or (mapv second results)) %)
+       ((&util/with-field* :types
+          (&type/$or (mapv second results)))
+        %)
        )))
