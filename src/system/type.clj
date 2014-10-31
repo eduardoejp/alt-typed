@@ -1,6 +1,7 @@
 (ns system.type
   (:refer-clojure :exclude [resolve])
-  (:require [clojure.core.match :refer [match]]
+  (:require [clojure.template :refer [do-template]]
+            [clojure.core.match :refer [match]]
             (system [util :as &util :refer [state-seq-m exec
                                             map-m reduce-m
                                             zero return return-all]])))
@@ -17,6 +18,12 @@
                  (get-in hierarchy [:descendants class])))))
 
 ;; [Interface]
+;; Constants
+(def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
+(def +truthy+ [::complement +falsey+])
+
+(def +init+ (Types. {} (TypeVars. 0 {}) (BoundTypes. 0 {}) (make-hierarchy)))
+
 ;; Monads / vars
 (def fresh-var
   (fn [^Types state]
@@ -226,8 +233,63 @@
     :else
     zero))
 
-;; Constants
-(def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
-(def +truthy+ [::complement +falsey+])
+;; Monads / Types
+(do-template [<fn> <tag> <preferred> <LT> <GT>]
+  (letfn [(adder [base addition]
+            (match [base addition]
+              [_ [<tag> ?addition]]
+              (reduce-m state-seq-m adder base ?addition)
+              
+              [[<tag> ?base] _]
+              (exec state-seq-m
+                [veredicts (map-m state-seq-m
+                                  (fn [=base]
+                                    (&util/parallel [(exec state-seq-m
+                                                       [_ (solve =base addition)]
+                                                       (return state-seq-m <LT>))
+                                                     (exec state-seq-m
+                                                       [_ (solve addition =base)]
+                                                       (return state-seq-m <GT>))
+                                                     (return state-seq-m :peer)]))
+                                  ?base)]
+                (cond (some (partial = :parent) veredicts)
+                      (return state-seq-m base)
 
-(def +init+ (Types. {} (TypeVars. 0 {}) (BoundTypes. 0 {}) (make-hierarchy)))
+                      (every? (partial = :peer) veredicts)
+                      (return state-seq-m [<tag> (conj ?base addition)])
+
+                      :else
+                      (if-let [rem-types (->> (map vector ?base veredicts)
+                                              (filter (comp (partial not= :child) second))
+                                              (map first)
+                                              seq)]
+                        (return state-seq-m [<tag> (conj (vec rem-types) addition)])
+                        (return state-seq-m addition))))
+              
+              [_ _]
+              (&util/parallel [(exec state-seq-m
+                                 [_ (solve base addition)]
+                                 (return state-seq-m <preferred>))
+                               (return state-seq-m [<tag> [base addition]])])
+              ))]
+    (defn <fn> [types]
+      (match (vec types)
+        []
+        zero
+        
+        [type & others]
+        (reduce-m state-seq-m adder type others)
+        )))
+
+  $or  ::union        base     :parent :child
+  $and ::intersection addition :child  :parent
+  )
+
+;; (Or String Number) Long = (Or String Number)
+;; (And String Number) Long = (And String Long)
+
+;; (Or String Number) Any = Any
+;; (And String Number) Any = (And String Long)
+
+;; (Or String Number) Nothing = (Or String Number)
+;; (And String Number) Nothing = Nothing

@@ -42,13 +42,12 @@
       [=params (map-m state-seq-m (partial clean-env to-clean) ?params)]
       (return state-seq-m [::&type/object ?class =params]))
 
-    
     [::&type/union ?types]
     (exec state-seq-m
       [=types (map-m state-seq-m (partial clean-env to-clean) ?types)]
-      (return state-seq-m [::&type/union =types]))
+      (&util/with-field* :types
+        (&type/$or (vec =types))))
 
-    
     [::&type/complement ?type]
     (exec state-seq-m
       [=type (clean-env to-clean ?type)]
@@ -137,7 +136,8 @@
     [::&type/union ?types]
     (exec state-seq-m
       [=types (map-m state-seq-m (partial prettify-type mappings) ?types)]
-      (return state-seq-m [::&type/union =types]))
+      (&util/with-field* :types
+        (&type/$or =types)))
 
     [::&type/complement ?type]
     (exec state-seq-m
@@ -180,21 +180,6 @@
                               [::&type/all (vec used-vars) arity*])))
       )))
 
-(defn ^:private classify [worlds]
-  (if (empty? worlds)
-    zero
-    (let [[[state type :as world] & others] worlds
-          [take leave] (reduce (fn [[take leave] [state* _ :as pair]]
-                                 (if (= state state*)
-                                   [(conj take pair) leave]
-                                   [take (conj leave pair)]))
-                               [[world] []]
-                               others)]
-      #(let [classification (if (= 1 (count take))
-                              (list [% type])
-                              (list [% [::&type/union (map second take)]]))]
-         (concat classification ((classify leave) %))))))
-
 (defn ^:private merge-arities [worlds]
   (if (empty? worlds)
     zero
@@ -210,8 +195,9 @@
       (fn [state]
         (let [batch (if (= 1 (count taken))
                       (list [state (-> taken first (nth 1))])
-                      (list [state (let [returns [::&type/union (map #(-> % (nth 1) (nth 2)) taken)]]
-                                     (-> taken first (nth 1) (assoc-in [2] returns)))]))]
+                      (list [state (let [[[_ returns]] ((&type/$or (mapv #(-> % (nth 1) (nth 2)) taken)) state)]
+                                     (-> taken first (nth 1) (assoc-in [2] returns)))])
+                      )]
           (concat batch ((merge-arities left) state))))
       )))
 
@@ -324,33 +310,40 @@
     (if (empty? ?value)
       (return state-seq-m [::&type/object 'clojure.lang.PersistentList [[::&type/nothing]]])
       (exec state-seq-m
-        [=members (map-m state-seq-m check* ?value)]
-        (return state-seq-m [::&type/object 'clojure.lang.PersistentList [[::&type/union =members]]])))
+        [=elems (map-m state-seq-m check* ?value)
+         =elems (&type/$or (vec =elems))]
+        (return state-seq-m [::&type/object 'clojure.lang.PersistentList [=elems]])))
     
     [::&parser/#vector ?value]
     (if (empty? ?value)
       (return state-seq-m [::&type/object 'clojure.lang.IPersistentVector [[::&type/nothing]]])
       (exec state-seq-m
-        [=members (map-m state-seq-m check* ?value)]
-        (return state-seq-m [::&type/object 'clojure.lang.IPersistentVector [[::&type/union =members]]])))
+        [=elems (map-m state-seq-m check* ?value)
+         =elems (&type/$or (vec =elems))]
+        (return state-seq-m [::&type/object 'clojure.lang.IPersistentVector [=elems]])))
 
     [::&parser/#map ?value]
     (if (empty? ?value)
       (return state-seq-m [::&type/object 'clojure.lang.IPersistentMap [[::&type/nothing] [::&type/nothing]]])
       (exec state-seq-m
-        [=members (map-m state-seq-m check* (seq ?value))
-         :let [[=k =v] (reduce (fn [[ks vs] [k v]]
-                                 [(conj ks k) (conj vs v)])
-                               [[] []]
-                               (partition 2 =members))]]
-        (return state-seq-m [::&type/object 'clojure.lang.IPersistentMap [[::&type/union =k] [::&type/union =v]]])))
+        [=elems (map-m state-seq-m
+                       (fn [[?k ?v]]
+                         (exec state-seq-m
+                           [=k (check* ?k)
+                            =v (check* ?v)]
+                           (return state-seq-m [=k =v])))
+                       (seq ?value))
+         =k (&type/$or (mapv first =elems))
+         =v (&type/$or (mapv second =elems))]
+        (return state-seq-m [::&type/object 'clojure.lang.IPersistentMap [=k =v]])))
 
     [::&parser/#set ?value]
     (if (empty? ?value)
       (return state-seq-m [::&type/object 'clojure.lang.IPersistentSet [[::&type/nothing]]])
       (exec state-seq-m
-        [=members (map-m state-seq-m check* ?value)]
-        (return state-seq-m [::&type/object 'clojure.lang.IPersistentSet [[::&type/union =members]]])))
+        [=elems (map-m state-seq-m check* ?value)
+         =elems (&type/$or (vec =elems))]
+        (return state-seq-m [::&type/object 'clojure.lang.IPersistentSet [=elems]])))
     
     [::&parser/symbol ?symbol]
     (&util/with-field :env
@@ -403,7 +396,7 @@
                           =else (check* ?else)
                           ;; :let [_ (prn ::&parser/if 'THEN+ELSE)]
                           ]
-                         (return state-seq-m [::&type/union (list =then =else)]))]))
+                         (&type/$or [=then =else]))]))
 
     [::&parser/case ?value ?clauses ?default]
     (exec state-seq-m
@@ -416,7 +409,7 @@
                               =test (if (seq? ?test)
                                       (exec state-seq-m
                                         [?parts (map-m state-seq-m check* ?test)]
-                                        (return state-seq-m [::&type/union (vec ?parts)]))
+                                        (&type/$or (vec ?parts)))
                                       (check* ?test))
                               :let [_ (prn '=test =test)]]
                              (return state-seq-m [=test ?form])))
@@ -539,5 +532,5 @@
        0 '()
        1 (list [% (-> results first (nth 1))])
        ;; else
-       (list [% [::&type/union (map second results)]])
+       ((&type/$or (mapv second results)) %)
        )))

@@ -200,22 +200,27 @@
   (run '(do (ann ex-info [java.lang.String (clojure.lang.IPersistentMap Any Any) -> java.lang.Exception])
           (throw (ex-info "YOLO" {}))))
 
-  (run ''(1 dos "tres"))
 
+  [java.lang.String -> (Or "YOLO" java.lang.Long)]
+  (run '(do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
+          (fn foo [x]
+            (let [result (parse-int x)]
+              (if result
+                result
+                "YOLO")))))
   
 
   ;; MISSING: class conversions
   ;; MISSING: throw, try, catch, finally
   
   ;; MISSING: loop, recur
+  ;; MISSING: treating objects as IFn (like keywords & maps)
   
   ;; MISSING: Java interop
   ;; MISSING: binding
   
   ;; MISSING: ns management
   ;; MISSING: records & tuples
-  
-  ;; MISSING: treating objects as IFn (like keywords & maps)
   
   ;; MISSING: def(protocol|type|record)
   ;; MISSING: proxy & reify
@@ -226,10 +231,8 @@
   ;; MISSING: prelude
   ;; MISSING: gen-class
 
-  ;; MISSING: Union generation
-  ;; MISSING: Intersection generation
-  
 
+  
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
   (run '(do (ann get-object [-> java.lang.Object])
