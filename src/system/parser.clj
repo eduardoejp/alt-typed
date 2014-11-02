@@ -330,6 +330,18 @@
       [*object (parse ?object)]
       (return state-seq-m [::monitor-exit *object]))
 
+    (['binding ?bindings & ?body] :seq)
+    (exec state-seq-m
+      [*bindings (map-m state-seq-m
+                        (fn [[label value]]
+                          (exec state-seq-m
+                            [*label (parse label)
+                             *value (parse value)]
+                            (return state-seq-m [*label *value])))
+                        (partition 2 ?bindings))
+       *body (map-m state-seq-m parse ?body)]
+      (return state-seq-m [::binding *bindings `[::do ~@*body]]))
+    
     (['ann (?var :guard symbol?) ?type-def] :seq)
     (do ;; (prn `[~'ann ~?var ~?type-def])
         (exec state-seq-m

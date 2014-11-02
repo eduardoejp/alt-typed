@@ -489,20 +489,6 @@
               (&env/resolve-var ?var))]
       (return state-seq-m [::&type/object 'clojure.lang.Var [=var]]))
 
-    [::&parser/monitor-enter ?object]
-    (exec state-seq-m
-      [=object (check* ?object)
-       _ (&util/with-field* :types
-           (&type/solve [::&type/complement [::&type/nil]] =object))]
-      (return state-seq-m [::&type/nil]))
-
-    [::&parser/monitor-exit ?object]
-    (exec state-seq-m
-      [=object (check* ?object)
-       _ (&util/with-field* :types
-           (&type/solve [::&type/complement [::&type/nil]] =object))]
-      (return state-seq-m [::&type/nil]))
-
     [::&parser/throw ?ex]
     (exec state-seq-m
       [=ex (check* ?ex)
@@ -538,11 +524,43 @@
        =finally (check* ?finally)
        =all-returning (&type/parallel-combine-types (cons =clean-body =catches))]
       (&type/sequentially-combine-types [=finally =all-returning]))
-    
+
     [::&parser/catch ?class ?label ?body]
     (with-env {?label [::&type/object ?class []]}
       (check* ?body))
+    
+    [::&parser/monitor-enter ?object]
+    (exec state-seq-m
+      [=object (check* ?object)
+       _ (&util/with-field* :types
+           (&type/solve [::&type/complement [::&type/nil]] =object))]
+      (return state-seq-m [::&type/nil]))
 
+    [::&parser/monitor-exit ?object]
+    (exec state-seq-m
+      [=object (check* ?object)
+       _ (&util/with-field* :types
+           (&type/solve [::&type/complement [::&type/nil]] =object))]
+      (return state-seq-m [::&type/nil]))
+
+    [::&parser/binding ?bindings ?body]
+    (exec state-seq-m
+      [_ (map-m state-seq-m
+                (fn [[label value]]
+                  (match label
+                    [::&parser/symbol ?label]
+                    (exec state-seq-m
+                      [=var (&util/with-field :env
+                              (&env/resolve-var ?label))
+                       =value (check* value)]
+                      (&util/with-field* :types
+                        (&type/solve =var =value)))
+                    
+                    :else
+                    zero))
+                ?bindings)]
+      (check* ?body))
+    
     [::&parser/fn ?local-name ?args ?body]
     (exec state-seq-m
       [worlds (&util/collect (exec state-seq-m

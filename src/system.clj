@@ -260,6 +260,16 @@
               (ann read-line [-> (Eff String {:io IO})])
               (read-line)
               (throw (ex)))
+
+            (1)
+            (do (ann global java.lang.String)
+              (binding [global "YOLO"]
+                1))
+
+            ()
+            (do (ann global java.lang.String)
+              (binding [global 10]
+                1))
             )))
 
   (run '(do (ann-class String [Object])
@@ -289,7 +299,9 @@
   ;; MISSING: typing macros
 
   ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
-
+  ;; MISSING: Destructuring
+  ;; MISSING: covariance, contravariance & invariance.
+  
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
   (run '(do (ann get-object [-> java.lang.Object])
@@ -298,6 +310,14 @@
                             [Boolean -> :meme]))
           (fn foo []
             (use-case (get-object)))))
+
+  (run '(do (ann global java.lang.String)
+          (binding [global "YOLO"]
+            1)))
+
+  (run '(do (ann global java.lang.String)
+          (binding [global 10]
+            1)))
 
   ;; Refactorings to do:
   ;; ::expr instead of ::bound to signal a type that has been calculated by the type-checker.
