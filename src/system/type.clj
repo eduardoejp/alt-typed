@@ -289,6 +289,56 @@
   $and ::intersection addition base     :child  :parent
   )
 
+(let [adder (fn [t1 t2]
+              (match [t1 t2]
+                [[::try ?data-1 ?ex-1] [::try ?data-2 ?ex-2]]
+                (exec state-seq-m
+                  [=exs ($or [?ex-1 ?ex-2])]
+                  (return state-seq-m [::try ?data-2 =exs]))
+                
+                [[::try ?data-1 ?ex-1] _]
+                (return state-seq-m [::try t2 ?ex-1])
+                
+                [_ _]
+                (return state-seq-m t2)
+                ))]
+  (defn sequentially-combine-types [types]
+    (match (vec types)
+      []
+      zero
+
+      [?init & ?others]
+      (reduce-m state-seq-m adder ?init ?others))))
+
+(let [adder (fn [t1 t2]
+              (match [t1 t2]
+                [[::try ?data-1 ?ex-1] [::try ?data-2 ?ex-2]]
+                (exec state-seq-m
+                  [=data ($or [?data-1 ?data-2])
+                   =exs ($or [?ex-1 ?ex-2])]
+                  (return state-seq-m [::try =data =exs]))
+                
+                [[::try ?data-1 ?ex-1] _]
+                (exec state-seq-m
+                  [=data ($or [?data-1 t2])]
+                  (return state-seq-m [::try =data ?ex-1]))
+                
+                [_ [::try ?data-2 ?ex-2]]
+                (exec state-seq-m
+                  [=data ($or [t1 ?data-2])]
+                  (return state-seq-m [::try =data ?ex-2]))
+                
+                [_ _]
+                ($or [t1 t2])
+                ))]
+  (defn parallel-combine-types [types]
+    (match (vec types)
+      []
+      zero
+
+      [?init & ?others]
+      (reduce-m state-seq-m adder ?init ?others))))
+
 ;; (Or String Number) Long = (Or String Number)
 ;; (And String Number) Long = (And String Long)
 

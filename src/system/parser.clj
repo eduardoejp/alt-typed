@@ -257,13 +257,51 @@
     (['var (?var :guard symbol?)] :seq)
     (return state-seq-m [::var ?var])
 
+    (['throw ?ex] :seq)
+    (exec state-seq-m
+      [*ex (parse ?ex)]
+      (return state-seq-m [::throw *ex]))
+
+    (['try & ?sub-exprs] :seq)
+    (let [[?body ?sub-exprs] (split-with (fn [expr]
+                                           (not (and (seq? expr)
+                                                     (or (-> expr first (= 'catch))
+                                                         (-> expr first (= 'finally))))))
+                                         ?sub-exprs)
+          [?catches [?finally]] (split-with (fn [expr]
+                                              (not (and (seq? expr)
+                                                        (-> expr first (= 'finally)))))
+                                            ?sub-exprs)]
+      (exec state-seq-m
+        [*body (map-m state-seq-m parse ?body)
+         *catches (map-m state-seq-m parse ?catches)
+         *finally (exec state-seq-m
+                    [*finally (map-m state-seq-m parse (rest ?finally))]
+                    (return state-seq-m `[::do ~@*finally]))]
+        (return state-seq-m [::try `[::do ~@*body] (vec *catches) *finally])))
+
+    (['catch (?class :guard symbol?) (?var :guard symbol?) & ?body] :seq)
+    (exec state-seq-m
+      [*body (map-m state-seq-m parse ?body)]
+      (return state-seq-m [::catch ?class ?var `[::do ~@*body]]))
+
+    (['monitor-enter ?object] :seq)
+    (exec state-seq-m
+      [*object (parse ?object)]
+      (return state-seq-m [::monitor-enter *object]))
+
+    (['monitor-exit ?object] :seq)
+    (exec state-seq-m
+      [*object (parse ?object)]
+      (return state-seq-m [::monitor-exit *object]))
+
     (['ann (?var :guard symbol?) ?type-def] :seq)
     (do ;; (prn `[~'ann ~?var ~?type-def])
-      (exec state-seq-m
-        [*type-def (parse-type-def ?type-def)
-         ;; :let [_ (prn '*type-def *type-def)]
-         ]
-        (return state-seq-m [::ann ?var *type-def])))
+        (exec state-seq-m
+          [*type-def (parse-type-def ?type-def)
+           ;; :let [_ (prn '*type-def *type-def)]
+           ]
+          (return state-seq-m [::ann ?var *type-def])))
 
     (['ann-class (?class :guard type-ctor?) (?parents :guard (every-pred vector? (partial every? type-ctor?)))] :seq)
     (exec state-seq-m
@@ -283,7 +321,7 @@
     (['fn ?local-name (?args :guard vector?) & ?body] :seq)
     (exec state-seq-m
       [*body (map-m state-seq-m parse ?body)]
-      (return state-seq-m [::fn ?local-name ?args *body]))
+      (return state-seq-m [::fn ?local-name ?args `[::do ~@*body]]))
 
     ([?fn & ?args] :seq)
     (exec state-seq-m

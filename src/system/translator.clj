@@ -16,7 +16,9 @@
     nil
     
     [::&type/literal _ ?value]
-    ?value
+    (if (symbol? ?value)
+      `'~?value
+      ?value)
     
     [::&type/object ?class ?params]
     (if (empty? ?params)
@@ -28,6 +30,9 @@
     
     [::&type/complement ?tyoe]
     `(~'Not ~(type->code ?tyoe))
+
+    [::&type/try ?data ?ex]
+    `(~'Try ~(type->code ?data) ~(type->code ?ex))
     
     [::&type/arity ?args ?return]
     `[~@(map type->code ?args) ~'-> ~(type->code ?return)]

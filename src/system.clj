@@ -29,95 +29,95 @@
               types))
           
           (do-template [<type> <form>]
-            (assert (= '(<type>) (run '<form>)))
+            (assert (= '<type> (run '<form>)))
             
-            nil
+            (nil)
             nil
 
+            (true)
             true
-            true
 
+            (10)
             10
-            10
 
+            (10.0)
             10.0
-            10.0
 
+            (\a)
             \a
-            \a
 
+            (:lol)
             :lol
-            :lol
 
+            (10N)
             10N
-            10N
 
+            (10M)
             10M
-            10M
 
-            1/2
+            (1/2)
             1/2
 
-            nil
+            (nil)
             (do nil)
             
-            (clojure.lang.Var Nothing)
+            ((clojure.lang.Var Nothing))
             (def foo)
 
-            (clojure.lang.Var nil)
+            ((clojure.lang.Var nil))
             (def foo (do nil))
 
-            nil
+            (nil)
             (let [foo nil]
               nil)
 
-            10
+            (10)
             (let [foo 10]
               foo)
 
-            nil
+            (nil)
             (do (def foo nil)
               foo)
 
-            (clojure.lang.Var 10)
+            ((clojure.lang.Var 10))
             (do (def foo 10)
               #'foo)
 
-            (Or nil java.lang.Long)
+            ((Or nil java.lang.Long))
             (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
               (parse-int "1234"))
 
-            nil
+            (nil)
             (defalias (Maybe x) (Or nil x))
 
-            (Or "YOLO" java.lang.Long)
+            ((Or "YOLO" java.lang.Long))
             (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
               (let [result (parse-int "1234")]
                 (if result
                   result
                   "YOLO")))
 
-            (All [a] [a -> a])
+            ((All [a] [a -> a]))
             (fn foo [x] x)
 
-            (clojure.lang.IPersistentVector Nothing)
+            ((clojure.lang.IPersistentVector Nothing))
             []
 
-            (clojure.lang.IPersistentMap Nothing Nothing)
+            ((clojure.lang.IPersistentMap Nothing Nothing))
             {}
 
-            (clojure.lang.IPersistentSet Nothing)
+            ((clojure.lang.IPersistentSet Nothing))
             #{}
 
-            (clojure.lang.IPersistentVector (Or :klk "YOLO"))
+            ((clojure.lang.IPersistentVector (Or :klk "YOLO")))
             [:klk "YOLO"]
             
-            [java.lang.String -> (Or nil java.lang.Long)]
+            ([java.lang.String -> (Or nil java.lang.Long)])
             (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
               (fn foo [x]
                 (parse-int x)))
 
-            [java.lang.String -> (Or "YOLO" java.lang.Long)]
+            ([java.lang.String -> (Or "YOLO" java.lang.Long)])
             (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
               (fn foo [x]
                 (let [result (parse-int x)]
@@ -125,8 +125,8 @@
                     result
                     "YOLO"))))
 
-            (Fn [clojure.lang.IPersistentMap -> :klk]
-                [(Not clojure.lang.IPersistentMap) -> "manito"])
+            ((Fn [clojure.lang.IPersistentMap -> :klk]
+                 [(Not clojure.lang.IPersistentMap) -> "manito"]))
             (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
                               [(Not clojure.lang.IPersistentMap) -> false]))
               (fn foo [x]
@@ -134,8 +134,8 @@
                   :klk
                   "manito")))
             
-            (Fn [clojure.lang.IPersistentMap -> :yolo]
-                [(Not clojure.lang.IPersistentMap) -> "lol"])
+            ((Fn [clojure.lang.IPersistentMap -> :yolo]
+                 [(Not clojure.lang.IPersistentMap) -> "lol"]))
             (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
                               [(Not clojure.lang.IPersistentMap) -> false]))
               (fn foo [x]
@@ -144,8 +144,8 @@
                     :yolo
                     "lol"))))
 
-            (Fn [clojure.lang.IPersistentMap -> "manito"]
-                [(Not clojure.lang.IPersistentMap) -> :klk])
+            ((Fn [clojure.lang.IPersistentMap -> "manito"]
+                 [(Not clojure.lang.IPersistentMap) -> :klk]))
             (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
                               [(Not clojure.lang.IPersistentMap) -> false]))
               (fn foo [x]
@@ -154,19 +154,19 @@
                           :klk)]
                   x)))
 
-            java.lang.Object
+            (java.lang.Object)
             (do (ann-class java.lang.String [java.lang.Object])
               (ann foo [java.lang.Object -> java.lang.Object])
               (foo "bar"))
 
-            (Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"])
+            ((Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"]))
             (fn case-test [x]
               (case x
                 1   "YOLO"
                 "2" "LOL"
                 :3  "MEME"))
             
-            (Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"] [Any -> "default"])
+            ((Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"] [Any -> "default"]))
             (fn case-test [x]
               (case x
                 1   "YOLO"
@@ -174,7 +174,7 @@
                 :3  "MEME"
                 "default"))
 
-            (Fn [(Or 1 2 3) -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"] [Any -> "default"])
+            ((Fn [(Or 1 2 3) -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"] [Any -> "default"]))
             (fn case-test [x]
               (case x
                 (1 2 3)   "YOLO"
@@ -182,11 +182,74 @@
                 :3  "MEME"
                 "default"))
 
-            yolo
+            ('yolo)
             'yolo
 
-            (clojure.lang.PersistentList (Or 1 dos "tres"))
+            ((clojure.lang.PersistentList (Or 1 'dos "tres")))
             '(1 dos "tres")
+
+            (nil)
+            (monitor-enter "YOLO")
+            
+            (nil)
+            (monitor-exit "YOLO")
+            
+            (nil)
+            (do (monitor-enter "YOLO")
+              (monitor-exit "YOLO"))
+
+            ()
+            (monitor-enter nil)
+
+            ()
+            (monitor-exit nil)
+
+            ((Try Nothing java.lang.Exception))
+            (do (ann ex [-> java.lang.Exception])
+              (throw (ex)))
+
+            ((Try 1 java.lang.Exception))
+            (do (ann ex [-> java.lang.Exception])
+              (throw (ex))
+              1)
+
+            ((Try :else java.lang.Exception))
+            (do (ann test (Or true false))
+              (ann ex [-> java.lang.Exception])
+              (let [test* test]
+                (if test*
+                  (throw (ex))
+                  :else)))
+
+            ((Try :else java.lang.Exception))
+            (run '(do (ann test (Or true false))
+                    (ann ex [-> java.lang.Exception])
+                    (let [test* test]
+                      (try (if test*
+                             (throw (ex))
+                             :else)))))
+
+            ((Or :catch :else))
+            (do (ann test (Or true false))
+              (ann ex [-> java.lang.Exception])
+              (let [test* test]
+                (try (if test*
+                       (throw (ex))
+                       :else)
+                  (catch java.lang.Exception e
+                    :catch)
+                  (finally :finally))))
+
+            ((Try (Or :catch :else) java.lang.Exception))
+            (do (ann test (Or true false))
+              (ann ex [-> java.lang.Exception])
+              (let [test* test]
+                (try (if test*
+                       (throw (ex))
+                       :else)
+                  (catch java.lang.YoloException e
+                    :catch)
+                  (finally :finally))))
             )))
 
   (run '(do (ann-class String [Object])
@@ -201,38 +264,29 @@
           (throw (ex-info "YOLO" {}))))
 
 
-  [java.lang.String -> (Or "YOLO" java.lang.Long)]
-  (run '(do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
-          (fn foo [x]
-            (let [result (parse-int x)]
-              (if result
-                result
-                "YOLO")))))
+  
   
 
-  ;; MISSING: class conversions
-  ;; MISSING: throw, try, catch, finally
-  
   ;; MISSING: loop, recur
-  ;; MISSING: treating objects as IFn (like keywords & maps)
-  
-  ;; MISSING: Java interop
-  ;; MISSING: binding
-  
+  ;; MISSING: Side-effects
+
   ;; MISSING: ns management
+  ;; MISSING: binding
+  ;; MISSING: Type conversions & treating objects as IFn (like keywords & maps)
+  ;; MISSING: Methods & fields for classes
+  
   ;; MISSING: records & tuples
-  
-  ;; MISSING: def(protocol|type|record)
-  ;; MISSING: proxy & reify
-
-  ;; MISSING: monitor-enter & monitor-leave
-  ;; MISSING: multimethods
-
   ;; MISSING: prelude
-  ;; MISSING: gen-class
-
-
+  ;; MISSING: Java interop
+  ;; MISSING: def(protocol|type|record), proxy & reify
   
+  ;; MISSING: multimethods
+  ;; MISSING: gen-class
+  ;; MISSING: var-args
+  ;; MISSING: typing macros
+
+  ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
+
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
   (run '(do (ann get-object [-> java.lang.Object])
@@ -241,6 +295,33 @@
                             [Boolean -> :meme]))
           (fn foo []
             (use-case (get-object)))))
+
+  ;; (run '(do (ann ex [-> java.lang.Exception])
+  ;;         (if true
+  ;;           (throw (ex))
+  ;;           :else)))
+
+  ;; (run '(do (ann ex [-> java.lang.Exception])
+  ;;         (if false
+  ;;           (throw (ex))
+  ;;           :else)))
+
+  (run '(do (ann test java.lang.Boolean)
+          (ann ex [-> java.lang.Exception])
+          (let [test* test]
+            (if test*
+              (throw (ex))
+              :else))))
+
+  (run '(do (ann test java.lang.Boolean)
+          (ann ex [-> java.lang.Exception])
+          (if test
+            :else
+            (throw (ex)))))
+
+  
+
+  
 
   ;; This is a valid way of implementing letfn using a macro...
   ;; (let [odd* (fn [odd even]

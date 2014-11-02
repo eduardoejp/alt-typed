@@ -196,7 +196,7 @@
         (let [batch (if (= 1 (count taken))
                       (list [state (-> taken first (nth 1))])
                       (list [state (let [[[_ returns]] ((&util/with-field* :types
-                                                          (&type/$or (mapv #(-> % (nth 1) (nth 2)) taken))) state)]
+                                                          (&type/parallel-combine-types (mapv #(-> % (nth 1) (nth 2)) taken))) state)]
                                      (-> taken first (nth 1) (assoc-in [2] returns)))])
                       )]
           (concat batch ((merge-arities left) state))))
@@ -215,14 +215,16 @@
            (&type/update-binding local =type))]
       (return state-seq-m =type))
     
-    ;; [::&type/object 'java.lang.Boolean []]
-    ;; (exec state-seq-m
-    ;;   [=type (return-all (list [::&type/literal java.lang.Boolean true]
-    ;;                            [::&type/literal java.lang.Boolean false]))
-    ;;    _ (&util/with-field* :types
-    ;;        (&type/update-binding local =type))]
-    ;;   (return state-seq-m =type))
-
+    [::&type/object 'java.lang.Boolean []]
+    (do (println "Reached:" [::&type/object 'java.lang.Boolean []])
+      (exec state-seq-m
+        [=type (return-all (list [::&type/literal java.lang.Boolean true]
+                                 [::&type/literal java.lang.Boolean false]))
+         :let [_ (prn 'refine-local/=type =type)]
+         _ (&util/with-field* :types
+             (&type/update-binding local =type))]
+        (return state-seq-m =type)))
+    
     :else
     (return state-seq-m type)
     ))
@@ -232,14 +234,16 @@
   (exec state-seq-m
     [=form (check* form)
      :let [_ (prn 'refine/=form =form)]
-     state &util/get-state
+     ;; state &util/get-state
      ;; :let [_ (prn 'refine/=form =form 'state state)]
      _ (match =form
          [::&type/bound _]
          (exec state-seq-m
            [=type (&util/with-field* :types
                     (&type/deref-binding =form))
-            _ (refine-local types =form =type)]
+            :let [_ (prn 'refine/=form+ =type)]
+            =type* (refine-local types =form =type)
+            :let [_ (prn 'refine/=form++ =type*)]]
            (return state-seq-m true))
 
          :else
@@ -363,9 +367,10 @@
       1 (check* (first ?forms))
       ;; else
       (exec state-seq-m
-        [=forms (map-m state-seq-m check* ?forms)]
-        (return state-seq-m (last =forms))))
-    
+        [=forms (map-m state-seq-m check* ?forms)
+         =body (&type/sequentially-combine-types =forms)]
+        (return state-seq-m =body)))
+
     [::&parser/let ([[?label ?value] & ?bindings] :seq) ?body]
     (exec state-seq-m
       [=value (check* ?value)
@@ -383,19 +388,25 @@
       [=test (refine check* [&type/+truthy+ &type/+falsey+ [::&type/any]] ?test)
        ;; =test* (&util/with-field* :types
        ;;          (&type/deref-binding =test))
-       ;; :let [_ (prn ::&parser/if '=test =test*)]
+       ;; :let [_ (prn 'IF '=test =test =test*)]
        =return (&util/parallel [(exec state-seq-m
                                   [_ (&util/with-field* :types
                                        (&type/solve &type/+truthy+ =test))
-                                   ;; :let [_ (prn ::&parser/if 'THEN)]
+                                   =then (check* ?then)
+                                   ;; =test* (&util/with-field* :types
+                                   ;;          (&type/deref-binding =test))
+                                   ;; :let [_ (prn 'IF 'THEN =test* =then)]
                                    ]
-                                  (check* ?then))
+                                  (return state-seq-m =then))
                                 (exec state-seq-m
                                   [_ (&util/with-field* :types
                                        (&type/solve &type/+falsey+ =test))
-                                   ;; :let [_ (prn ::&parser/if 'ELSE)]
+                                   =else (check* ?else)
+                                   ;; =test* (&util/with-field* :types
+                                   ;;          (&type/deref-binding =test))
+                                   ;; :let [_ (prn 'IF 'ELSE =test* =else)]
                                    ]
-                                  (check* ?else))
+                                  (return state-seq-m =else))
                                 (exec state-seq-m
                                   [_ (&util/with-field* :types
                                        (&type/solve [::&type/any] =test))
@@ -403,11 +414,14 @@
                                    ;; =then* (&util/with-field* :types
                                    ;;          (&type/deref-binding =then))
                                    =else (check* ?else)
-                                   ;; :let [_ (prn ::&parser/if 'THEN+ELSE =then =then* =else)]
+                                   ;; =test* (&util/with-field* :types
+                                   ;;          (&type/deref-binding =test))
+                                   ;; :let [_ (prn 'IF 'THEN+ELSE =test* =then =else)]
                                    ]
                                   (&util/with-field* :types
-                                    (&type/$or [=then =else])))])
-       ;; :let [_ (prn ::&parser/if '=return =return)]
+                                    (&type/parallel-combine-types [=then =else])))
+                                ])
+       ;; :let [_ (println 'IF '=return =return)]
        ]
       (return state-seq-m =return))
 
@@ -475,6 +489,57 @@
               (&env/resolve-var ?var))]
       (return state-seq-m [::&type/object 'clojure.lang.Var [=var]]))
 
+    [::&parser/monitor-enter ?object]
+    (exec state-seq-m
+      [=object (check* ?object)
+       _ (&util/with-field* :types
+           (&type/solve [::&type/complement [::&type/nil]] =object))]
+      (return state-seq-m [::&type/nil]))
+
+    [::&parser/monitor-exit ?object]
+    (exec state-seq-m
+      [=object (check* ?object)
+       _ (&util/with-field* :types
+           (&type/solve [::&type/complement [::&type/nil]] =object))]
+      (return state-seq-m [::&type/nil]))
+
+    [::&parser/throw ?ex]
+    (exec state-seq-m
+      [=ex (check* ?ex)
+       _ (&util/with-field* :types
+           (&type/solve [::&type/object 'java.lang.Exception []] =ex))]
+      (return state-seq-m [::&type/try [::&type/nothing] =ex]))
+    
+    [::&parser/try ?body ?catches ?finally]
+    (exec state-seq-m
+      [=body (check* ?body)
+       =clean-body (match =body
+                     [::&type/try ?data ?exs]
+                     (let [thrown-exs (match ?exs
+                                        [::&type/object ?class _]
+                                        #{?class}
+
+                                        [::&type/union ?types]
+                                        (set (map second ?types)))
+                           handled-exs (set (map second ?catches))
+                           rem-exs (set/difference thrown-exs handled-exs)]
+                       (return state-seq-m (case (count rem-exs)
+                                             0 ?data
+                                             1 [::&type/try ?data [::&type/object (first rem-exs) []]]
+                                             ;; else
+                                             [::&type/try ?data [::&type/union (mapv (fn [ex] [::&type/object ex []]) rem-exs)]])))
+                     
+                     :else
+                     (return state-seq-m =body))
+       =catches (map-m state-seq-m check* ?catches)
+       =finally (check* ?finally)
+       =all-returning (&type/parallel-combine-types (cons =clean-body =catches))]
+      (&type/sequentially-combine-types [=finally =all-returning]))
+    
+    [::&parser/catch ?class ?label ?body]
+    (with-env {?label [::&type/object ?class []]}
+      (check* ?body))
+
     [::&parser/fn ?local-name ?args ?body]
     (exec state-seq-m
       [worlds (&util/collect (exec state-seq-m
@@ -491,7 +556,7 @@
                                              ?args)
                                 =return (with-env {?local-name =fn}
                                           (with-env (into {} (map vector ?args =args))
-                                            (check* `[::&parser/do ~@?body])))]
+                                            (check* ?body)))]
                                (generalize-arity [::&type/arity =args =return])))]
       (case (count worlds)
         0 zero
@@ -547,6 +612,6 @@
        1 (list [% (-> results first (nth 1))])
        ;; else
        ((&util/with-field* :types
-          (&type/$or (mapv second results)))
+          (&type/parallel-combine-types (mapv second results)))
         %)
        )))
