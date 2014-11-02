@@ -99,6 +99,9 @@
 
     'IO
     (return state-seq-m [::&types/io])
+
+    'Macro
+    (return state-seq-m [::&types/macro])
     
     (['Or & ?params] :seq)
     (exec state-seq-m
@@ -300,6 +303,14 @@
     (exec state-seq-m
       [*args (map-m state-seq-m parse ?args)]
       (return state-seq-m [::recur (vec *args)]))
+
+    (['assert ?test & [?message]] :seq)
+    (exec state-seq-m
+      [*test (parse ?test)
+       *message (if ?message
+                  (parse ?message)
+                  (return state-seq-m nil))]
+      (return state-seq-m [::assert *test *message]))
     
     (['def (?var :guard symbol?)] :seq)
     (return state-seq-m [::def ?var])

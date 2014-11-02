@@ -285,6 +285,14 @@
             (do (ann inc [java.lang.Long -> java.lang.Long])
               (loop [a 0]
                 (recur (inc a))))
+
+            ()
+            (do (ann defn Macro)
+              defn)
+
+            (10)
+            (do (ann defn Macro)
+              10)
             )))
 
   (run '(do (ann-class String [Object])
@@ -295,24 +303,23 @@
           (ann coll->str [(Collection (KV key val)) -> String])
           (coll->str (get-map))))
 
+  ;; MISSING: assert
   ;; MISSING: ns management
-  ;; MISSING: Type conversions & treating objects as IFn (like keywords & maps)
-  ;; MISSING: Methods & fields for classes
-  
-  ;; MISSING: records & tuples
   ;; MISSING: prelude
+  ;; MISSING: Type conversions & treating objects as IFn (like keywords & maps)
+  ;; MISSING: records & tuples
+  ;; MISSING: Destructuring
+  ;; MISSING: Methods & fields for classes
   ;; MISSING: Java interop
-  ;; MISSING: def(protocol|type|record), proxy & reify
   
+  ;; MISSING: def(protocol|type|record), proxy & reify
   ;; MISSING: multimethods
   ;; MISSING: gen-class
   ;; MISSING: var-args
-  ;; MISSING: typing macros
-
+  ;; MISSING: macro-expansion.
   ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
-  ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.
-  ;; MISSING: assert
+  
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
@@ -332,13 +339,22 @@
               (recur (inc cnt))
               :done))))
 
+  (run '(fn foo [x] x))
+
+  (run '(do (ann map? (Fn [Map -> true]
+                          [(Not Map) -> false]))
+          (fn foo [x]
+            (assert (map? x) "YOLO")
+            x)))
+
   
 
   ;; Refactorings to do:
   ;; ::expr instead of ::bound to signal a type that has been calculated by the type-checker.
   ;; Eliminate ::bound & ::var.
   ;; Have an ::interval type with local top and bottom as a substitute for type-vars.
-  
+  ;; Improve type updating mechanism in recur and allow recur to work with fn.
+  ;; Fix issue with refining.
   
   ;; (run '(do (ann ex [-> java.lang.Exception])
   ;;         (if true

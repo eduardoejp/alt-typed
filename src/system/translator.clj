@@ -36,6 +36,9 @@
 
     [::&type/io]
     'IO
+
+    [::&type/macro]
+    'Macro
     
     [::&type/arity ?args ?return]
     `[~@(map type->code ?args) ~'-> ~(type->code ?return)]

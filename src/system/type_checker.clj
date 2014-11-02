@@ -6,7 +6,8 @@
                                             zero return return-all]]
                     [env :as &env]
                     [type :as &type]
-                    [parser :as &parser]))
+                    [parser :as &parser]
+                    [ns :as &ns]))
   (:import (system.env Env)))
 
 ;; [Data]
@@ -356,11 +357,13 @@
         (return state-seq-m [::&type/object 'clojure.lang.IPersistentSet [=elems]])))
     
     [::&parser/symbol ?symbol]
-    (&util/with-field :env
-      (fn [state]
-        ;; (prn [::&parser/symbol ?symbol] state)
-        ((&env/resolve ?symbol) state)))
-
+    (exec state-seq-m
+      [=symbol (&util/with-field :env
+                 (&env/resolve ?symbol))]
+      (if (not= [::&type/macro] =symbol)
+        (return state-seq-m =symbol)
+        zero))
+    
     [::&parser/do & ?forms]
     (case (count ?forms)
       0 (return state-seq-m [::&type/nil])
@@ -528,6 +531,18 @@
                 (map vector =recur =args))]
       (return state-seq-m [::&type/nothing]))
 
+    [::&parser/assert ?test ?message]
+    (exec state-seq-m
+      [=message (check* ?message)
+       _ (&util/with-field* :types
+           (&type/solve [::&type/any] =message))
+       =test (check* ?test)
+       _ (&util/parallel [(&util/with-field* :types
+                            (&type/solve &type/+truthy+ =test))
+                          (&util/with-field* :types
+                            (&type/solve [::&type/object 'java.lang.Boolean []] =test))])]
+      (return state-seq-m [::&type/nothing]))
+
     [::&parser/def ?var]
     (exec state-seq-m
       [:let [=value [::&type/nothing]]
@@ -637,7 +652,8 @@
                                 =return (with-env {?local-name =fn}
                                           (with-env (into {} (map vector ?args =args))
                                             (check* ?body)))]
-                               (generalize-arity [::&type/arity =args =return])))]
+                               (generalize-arity [::&type/arity =args =return])))
+       :let [_ (prn (map second worlds))]]
       (case (count worlds)
         0 zero
         1 (&util/spread worlds)
