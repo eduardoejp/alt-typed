@@ -280,6 +280,26 @@
                   (parse ?default)
                   (return state-seq-m nil))]
       (return state-seq-m [::case *value *clauses *default]))
+
+    (['loop ?bindings & ?body] :seq)
+    (exec state-seq-m
+      [:let [locals (map (fn [pair]
+                           (let [label (first pair)]
+                             [label label]))
+                         (partition 2 ?bindings))]
+       *bindings (map-m state-seq-m
+                        (fn [[?label ?value]]
+                          (exec state-seq-m
+                            [*value (parse ?value)]
+                            (return state-seq-m [?label *value])))
+                        (partition 2 ?bindings))
+       *body (map-m state-seq-m parse ?body)]
+      (return state-seq-m [::let *bindings [::loop locals `[::do ~@*body]]]))
+
+    (['recur & ?args] :seq)
+    (exec state-seq-m
+      [*args (map-m state-seq-m parse ?args)]
+      (return state-seq-m [::recur (vec *args)]))
     
     (['def (?var :guard symbol?)] :seq)
     (return state-seq-m [::def ?var])

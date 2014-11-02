@@ -469,6 +469,65 @@
       ;; (return state-seq-m [::&type/union (vec =branches)])
       (return state-seq-m =branch))
 
+    [::&parser/loop ?locals ?body]
+    (exec state-seq-m
+      [=locals (map-m state-seq-m
+                      (fn [[label value]]
+                        (exec state-seq-m
+                          [=value (&util/with-field :env
+                                    (&env/resolve value))]
+                          (return state-seq-m [label =value])))
+                      ?locals)
+       locals-pre (map-m state-seq-m
+                         #(exec state-seq-m
+                            [=bound (&util/with-field :env
+                                      (&env/resolve %))]
+                            (&util/with-field* :types
+                              (&type/deref-binding =bound)))
+                         (mapv first =locals))
+       :let [_ (prn 'locals-pre locals-pre)]
+       _ (with-env (into {::recur (mapv first =locals)}
+                         =locals)
+           (check* ?body))
+       locals-post (map-m state-seq-m
+                          #(exec state-seq-m
+                             [=bound (&util/with-field :env
+                                       (&env/resolve %))]
+                             (&util/with-field* :types
+                               (&type/deref-binding =bound)))
+                          (mapv first =locals))
+       :let [_ (prn 'locals-post locals-pre)]]
+      (with-env (into {::recur (mapv first =locals)}
+                      =locals)
+        (check* ?body)))
+
+    [::&parser/recur ?args]
+    (exec state-seq-m
+      [=recur (&util/with-field :env
+                (&env/resolve ::recur))
+       =recur (map-m state-seq-m
+                     #(&util/with-field :env
+                        (&env/resolve %))
+                     =recur)
+       _ (if (= (count =recur) (count ?args))
+           (return state-seq-m nil)
+           zero)
+       =args (map-m state-seq-m check* ?args)
+       :let [_ (prn '=recur =recur)
+             _ (prn '=args =args)]
+       _ (map-m state-seq-m
+                (fn [[=e =a]]
+                  (exec state-seq-m
+                    [=wider (&util/with-field* :types
+                              (exec state-seq-m
+                                [_ (&type/solve =a =e)
+                                 =e (&type/deref-binding =e)]
+                                (&type/$or [=e =a])))]
+                    (&util/with-field* :types
+                      (&type/update-binding =e =wider))))
+                (map vector =recur =args))]
+      (return state-seq-m [::&type/nothing]))
+
     [::&parser/def ?var]
     (exec state-seq-m
       [:let [=value [::&type/nothing]]

@@ -270,6 +270,21 @@
             (do (ann global java.lang.String)
               (binding [global 10]
                 1))
+
+            (10)
+            (loop [a 10]
+              a)
+
+            (java.lang.Long)
+            (do (ann + [java.lang.Long java.lang.Long -> java.lang.Long])
+              (loop [a 10
+                     b 20]
+                (+ a b)))
+
+            (Nothing)
+            (do (ann inc [java.lang.Long -> java.lang.Long])
+              (loop [a 0]
+                (recur (inc a))))
             )))
 
   (run '(do (ann-class String [Object])
@@ -280,11 +295,7 @@
           (ann coll->str [(Collection (KV key val)) -> String])
           (coll->str (get-map))))
 
-  
-  ;; MISSING: loop, recur
-  
   ;; MISSING: ns management
-  ;; MISSING: binding
   ;; MISSING: Type conversions & treating objects as IFn (like keywords & maps)
   ;; MISSING: Methods & fields for classes
   
@@ -301,6 +312,7 @@
   ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
   ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.
+  ;; MISSING: assert
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
@@ -311,13 +323,16 @@
           (fn foo []
             (use-case (get-object)))))
 
-  (run '(do (ann global java.lang.String)
-          (binding [global "YOLO"]
-            1)))
 
-  (run '(do (ann global java.lang.String)
-          (binding [global 10]
-            1)))
+  ;; Must fix issue with refining in order to get this to type-check.
+  (run '(do (ann inc [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer])
+          (ann < [java.lang.Long java.lang.Long -> java.lang.Boolean])
+          (loop [cnt 0]
+            (if (< cnt 10)
+              (recur (inc cnt))
+              :done))))
+
+  
 
   ;; Refactorings to do:
   ;; ::expr instead of ::bound to signal a type that has been calculated by the type-checker.
