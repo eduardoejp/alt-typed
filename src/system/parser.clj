@@ -1,5 +1,6 @@
 (ns system.parser
-  (:require [clojure.core.match :refer [match]]
+  (:require [clojure.set :as set]
+            [clojure.core.match :refer [match]]
             (system [util :as &util :refer [state-seq-m exec
                                             map-m reduce-m
                                             zero return return-all]]
@@ -42,6 +43,24 @@
          ]
         (&util/return state-seq-m [::&types/arity *args *return])))))
 
+(defn test-effects [*effs]
+  (exec state-seq-m
+    [_ (if (not (empty? *effs))
+         (return state-seq-m nil)
+         zero)
+     _ (if (set/superset? #{:try :io} (set (keys *effs)))
+         (return state-seq-m nil)
+         zero)
+     _ (if-let [ex (:try *effs)]
+         (&util/with-field* :types
+           (&types/solve [::&types/object 'java.lang.Exception []] ex))
+         (return state-seq-m nil))
+     _ (if-let [io (:io *effs)]
+         (&util/with-field* :types
+           (&types/solve [::&types/io] io))
+         (return state-seq-m nil))]
+    (return state-seq-m nil)))
+
 (defn ^:private parse-type-def [type-def]
   ;; (prn 'parse-type-def type-def)
   (match type-def
@@ -77,6 +96,9 @@
 
     (?value :guard keyword?)
     (return state-seq-m [::&types/literal 'clojure.lang.Keyword ?value])
+
+    'IO
+    (return state-seq-m [::&types/io])
     
     (['Or & ?params] :seq)
     (exec state-seq-m
@@ -87,19 +109,32 @@
     (exec state-seq-m
       [*inner (parse-type-def ?inner)]
       (return state-seq-m [::&types/complement *inner]))
+
+    (['Eff ?data ?effs] :seq)
+    (exec state-seq-m
+      [*data (parse-type-def ?data)
+       *effs (map-m state-seq-m
+                    (fn [[k e]]
+                      (exec state-seq-m
+                        [=e (parse-type-def e)]
+                        (return state-seq-m [k =e])))
+                    ?effs)
+       :let [*effs (into {} *effs)]
+       _ (test-effects *effs)]
+      (return state-seq-m [::&types/eff *data *effs]))
     
     (?name :guard symbol?)
     (do ;; (prn '(?name :guard symbol?) `(~?name :guard ~'symbol?))
-      (&util/with-field* :types
-        (&types/resolve ?name)))
+        (&util/with-field* :types
+          (&types/resolve ?name)))
     
     [& ?parts]
     (do ;; (prn '[& ?parts])
-      (exec state-seq-m
-        [=arity (parse-arity parse-type-def type-def)
-         ;; :let [_ (prn '=arity =arity)]
-         ]
-        (return state-seq-m [::&types/function (list =arity)])))
+        (exec state-seq-m
+          [=arity (parse-arity parse-type-def type-def)
+           ;; :let [_ (prn '=arity =arity)]
+           ]
+          (return state-seq-m [::&types/function (list =arity)])))
 
     (['Fn & ?arities] :seq)
     (exec state-seq-m
@@ -108,15 +143,15 @@
 
     ([?fn & ?params] :seq)
     (do ;; (prn '[?fn & ?params] [?fn ?params])
-      (exec state-seq-m
-        [=type-fn (do (prn '?fn ?fn)
-                    (&util/with-field* :types
-                      (&types/resolve ?fn)))
-         ;; :let [_ (prn '=type-fn =type-fn)]
-         =params (map-m state-seq-m parse-type-def ?params)
-         ;; :let [_ (prn '=params =params)]
-         ]
-        (&types/fn-call =type-fn =params)))
+        (exec state-seq-m
+          [=type-fn (do (prn '?fn ?fn)
+                      (&util/with-field* :types
+                        (&types/resolve ?fn)))
+           ;; :let [_ (prn '=type-fn =type-fn)]
+           =params (map-m state-seq-m parse-type-def ?params)
+           ;; :let [_ (prn '=params =params)]
+           ]
+          (&types/fn-call =type-fn =params)))
     
     ;; :else
     ;; (do (prn 'parse-type-def/else)

@@ -204,16 +204,16 @@
             ()
             (monitor-exit nil)
 
-            ((Try Nothing java.lang.Exception))
+            ((Eff Nothing {:try java.lang.Exception}))
             (do (ann ex [-> java.lang.Exception])
               (throw (ex)))
 
-            ((Try 1 java.lang.Exception))
+            ((Eff 1 {:try java.lang.Exception}))
             (do (ann ex [-> java.lang.Exception])
               (throw (ex))
               1)
 
-            ((Try :else java.lang.Exception))
+            ((Eff :else {:try java.lang.Exception}))
             (do (ann test (Or true false))
               (ann ex [-> java.lang.Exception])
               (let [test* test]
@@ -221,13 +221,13 @@
                   (throw (ex))
                   :else)))
 
-            ((Try :else java.lang.Exception))
-            (run '(do (ann test (Or true false))
-                    (ann ex [-> java.lang.Exception])
-                    (let [test* test]
-                      (try (if test*
-                             (throw (ex))
-                             :else)))))
+            ((Eff :else {:try java.lang.Exception}))
+            (do (ann test (Or true false))
+              (ann ex [-> java.lang.Exception])
+              (let [test* test]
+                (try (if test*
+                       (throw (ex))
+                       :else))))
 
             ((Or :catch :else))
             (do (ann test (Or true false))
@@ -240,7 +240,7 @@
                     :catch)
                   (finally :finally))))
 
-            ((Try (Or :catch :else) java.lang.Exception))
+            ((Eff (Or :catch :else) {:try java.lang.Exception}))
             (do (ann test (Or true false))
               (ann ex [-> java.lang.Exception])
               (let [test* test]
@@ -250,6 +250,16 @@
                   (catch java.lang.YoloException e
                     :catch)
                   (finally :finally))))
+
+            ((Eff String {:io IO}))
+            (do (ann read-line [-> (Eff String {:io IO})])
+              (read-line))
+
+            ((Eff Nothing {:io IO, :try java.lang.Exception}))
+            (do (ann ex [-> java.lang.Exception])
+              (ann read-line [-> (Eff String {:io IO})])
+              (read-line)
+              (throw (ex)))
             )))
 
   (run '(do (ann-class String [Object])
@@ -260,16 +270,9 @@
           (ann coll->str [(Collection (KV key val)) -> String])
           (coll->str (get-map))))
 
-  (run '(do (ann ex-info [java.lang.String (clojure.lang.IPersistentMap Any Any) -> java.lang.Exception])
-          (throw (ex-info "YOLO" {}))))
-
-
   
-  
-
   ;; MISSING: loop, recur
-  ;; MISSING: Side-effects
-
+  
   ;; MISSING: ns management
   ;; MISSING: binding
   ;; MISSING: Type conversions & treating objects as IFn (like keywords & maps)
@@ -296,6 +299,12 @@
           (fn foo []
             (use-case (get-object)))))
 
+  ;; Refactorings to do:
+  ;; ::expr instead of ::bound to signal a type that has been calculated by the type-checker.
+  ;; Eliminate ::bound & ::var.
+  ;; Have an ::interval type with local top and bottom as a substitute for type-vars.
+  
+  
   ;; (run '(do (ann ex [-> java.lang.Exception])
   ;;         (if true
   ;;           (throw (ex))

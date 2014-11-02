@@ -1,6 +1,7 @@
 (ns system.type
   (:refer-clojure :exclude [resolve])
-  (:require [clojure.template :refer [do-template]]
+  (:require (clojure [set :as set]
+                     [template :refer [do-template]])
             [clojure.core.match :refer [match]]
             (system [util :as &util :refer [state-seq-m exec
                                             map-m reduce-m
@@ -197,6 +198,9 @@
           (list [state true])
           (zero nil))))
 
+    [[::io] [::io]]
+    (return state-seq-m true)
+
     :else
     zero
     ))
@@ -291,13 +295,18 @@
 
 (let [adder (fn [t1 t2]
               (match [t1 t2]
-                [[::try ?data-1 ?ex-1] [::try ?data-2 ?ex-2]]
+                [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
                 (exec state-seq-m
-                  [=exs ($or [?ex-1 ?ex-2])]
-                  (return state-seq-m [::try ?data-2 =exs]))
+                  [=effs (map-m state-seq-m
+                                (fn [key]
+                                  (exec state-seq-m
+                                    [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
+                                    (return state-seq-m [key =merged])))
+                                (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
+                  (return state-seq-m [::eff ?data-2 =effs]))
                 
-                [[::try ?data-1 ?ex-1] _]
-                (return state-seq-m [::try t2 ?ex-1])
+                [[::eff ?data-1 ?effs-1] _]
+                (return state-seq-m [::eff t2 ?effs-1])
                 
                 [_ _]
                 (return state-seq-m t2)
@@ -312,21 +321,26 @@
 
 (let [adder (fn [t1 t2]
               (match [t1 t2]
-                [[::try ?data-1 ?ex-1] [::try ?data-2 ?ex-2]]
+                [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
                 (exec state-seq-m
                   [=data ($or [?data-1 ?data-2])
-                   =exs ($or [?ex-1 ?ex-2])]
-                  (return state-seq-m [::try =data =exs]))
+                   =effs (map-m state-seq-m
+                                (fn [key]
+                                  (exec state-seq-m
+                                    [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
+                                    (return state-seq-m [key =merged])))
+                                (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
+                  (return state-seq-m [::eff =data =effs]))
                 
-                [[::try ?data-1 ?ex-1] _]
+                [[::eff ?data-1 ?effs-1] _]
                 (exec state-seq-m
                   [=data ($or [?data-1 t2])]
-                  (return state-seq-m [::try =data ?ex-1]))
+                  (return state-seq-m [::eff =data ?effs-1]))
                 
-                [_ [::try ?data-2 ?ex-2]]
+                [_ [::eff ?data-2 ?effs-2]]
                 (exec state-seq-m
                   [=data ($or [t1 ?data-2])]
-                  (return state-seq-m [::try =data ?ex-2]))
+                  (return state-seq-m [::eff =data ?effs-2]))
                 
                 [_ _]
                 ($or [t1 t2])

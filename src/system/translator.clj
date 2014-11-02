@@ -31,8 +31,11 @@
     [::&type/complement ?tyoe]
     `(~'Not ~(type->code ?tyoe))
 
-    [::&type/try ?data ?ex]
-    `(~'Try ~(type->code ?data) ~(type->code ?ex))
+    [::&type/eff ?data ?effects]
+    `(~'Eff ~(type->code ?data) ~(into {} (for [[k e] ?effects] [k (type->code e)])))
+
+    [::&type/io]
+    'IO
     
     [::&type/arity ?args ?return]
     `[~@(map type->code ?args) ~'-> ~(type->code ?return)]

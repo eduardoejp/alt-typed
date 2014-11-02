@@ -508,14 +508,17 @@
       [=ex (check* ?ex)
        _ (&util/with-field* :types
            (&type/solve [::&type/object 'java.lang.Exception []] =ex))]
-      (return state-seq-m [::&type/try [::&type/nothing] =ex]))
+      (return state-seq-m [::&type/eff [::&type/nothing] {:try =ex}]))
     
     [::&parser/try ?body ?catches ?finally]
     (exec state-seq-m
       [=body (check* ?body)
        =clean-body (match =body
-                     [::&type/try ?data ?exs]
-                     (let [thrown-exs (match ?exs
+                     [::&type/eff ?data ?effs]
+                     (let [thrown-exs (match (:try ?effs)
+                                        nil
+                                        #{}
+                                        
                                         [::&type/object ?class _]
                                         #{?class}
 
@@ -525,9 +528,9 @@
                            rem-exs (set/difference thrown-exs handled-exs)]
                        (return state-seq-m (case (count rem-exs)
                                              0 ?data
-                                             1 [::&type/try ?data [::&type/object (first rem-exs) []]]
+                                             1 [::&type/eff ?data {:try [::&type/object (first rem-exs) []]}]
                                              ;; else
-                                             [::&type/try ?data [::&type/union (mapv (fn [ex] [::&type/object ex []]) rem-exs)]])))
+                                             [::&type/eff ?data {:try [::&type/union (mapv (fn [ex] [::&type/object ex []]) rem-exs)]}])))
                      
                      :else
                      (return state-seq-m =body))
