@@ -90,25 +90,26 @@
       (list [state type]))))
 
 ;; Monads / Classes
-(let [qualify-class #(symbol "java::class" (name %))]
- (defn define-class [class parents]
+(defn ^:private qualify-class [class]
+  (symbol "java::class" (name class)))
+
+(defn define-class [class parents]
   (fn [^Types state]
-    (prn 'define-class class parents (.-class-hierarchy state))
     ;; (prn '(defined? (.-class-hierarchy state) (nth class 0)) (defined? (.-class-hierarchy state) (nth class 0)))
-    (when (not (defined? (.-class-hierarchy state) (nth class 0)))
-      (let [class-name (qualify-class (nth class 0))
-            ;; _ (prn 'parents parents '(map first parents) (map first parents))
-            hierarchy* (reduce #(derive %1 class-name %2)
-                               (.-class-hierarchy state)
-                               (map (comp qualify-class first) parents))]
-        ;; (prn '(.-class-hierarchy state) (.-class-hierarchy state))
-        (prn 'hierarchy* (mapv (comp qualify-class first) parents) hierarchy*)
-        (list [(assoc state :class-hierarchy hierarchy*) nil])
-        ))
-    )))
+    (let [class-name (qualify-class (nth class 0))]
+      (prn 'define-class class-name (defined? (.-class-hierarchy state) class-name) (.-class-hierarchy state))
+      (if (not (defined? (.-class-hierarchy state) class-name))
+        (let [;; _ (prn 'parents parents '(map first parents) (map first parents))
+              hierarchy* (reduce #(derive %1 class-name %2)
+                                 (.-class-hierarchy state)
+                                 (map (comp qualify-class first) parents))]
+          ;; (prn '(.-class-hierarchy state) (.-class-hierarchy state))
+          (prn 'hierarchy* (mapv (comp qualify-class first) parents) hierarchy*)
+          (list [(assoc state :class-hierarchy hierarchy*) nil]))
+        '()))
+    ))
 
 (defn super-class? [super sub]
-  ;; (prn 'super-class? super sub)
   (fn [^Types state]
     ;; (prn 'super-class?/state state)
     (let [hierarchy (.-class-hierarchy state)]
@@ -117,13 +118,53 @@
       ;;      (defined? hierarchy sub)
       ;;      (isa? hierarchy (symbol "java::class" (name super)) (symbol "java::class" (name sub)))
       ;;      hierarchy)
-      (list [state (or (and (defined? hierarchy super)
-                            (defined? hierarchy sub)
-                            (isa? hierarchy (symbol "java::class" (name super)) (symbol "java::class" (name sub))))
-                       (or (= super sub)
-                           (= super 'java.lang.Object)))]))))
+      (prn 'super-class?
+           super (defined? hierarchy super)
+           sub (defined? hierarchy sub)
+           [(qualify-class sub) (qualify-class super)]
+           (isa? hierarchy (qualify-class sub) (qualify-class super))
+           hierarchy)
+      (prn 'super-class? (and (defined? hierarchy super)
+                              (defined? hierarchy sub)
+                              (isa? hierarchy (qualify-class super) (qualify-class sub))))
+      (list [state (and (defined? hierarchy super)
+                        (defined? hierarchy sub)
+                        (isa? hierarchy (qualify-class sub) (qualify-class super)))]))))
 
 ;; Monads / Solving
+(defn upcast [target-type type]
+  (prn 'upcast target-type type)
+  (match [target-type type]
+    [::$fn [::function ?arities]]
+    (return state-seq-m type)
+
+    [::$fn [::literal 'clojure.lang.Keyword _]]
+    (return state-seq-m [::function (list [::arity (list [::object 'Map []]) [::any]])])
+
+    [::$fn [::literal 'clojure.lang.Symbol _]]
+    (return state-seq-m [::function (list [::arity (list [::object 'Map []]) [::any]])])
+
+    [::$fn [::object 'clojure.lang.IPersistentVector [?elem]]]
+    (return state-seq-m [::function (list [::arity (list [::object 'java.lang.Long []]) ?elem])])
+
+    [::$fn [::object 'clojure.lang.IPersistentMap [?key ?val]]]
+    (return state-seq-m [::function (list [::arity (list ?key) [::union (list [::nil] ?val)]])])
+
+    [::$fn [::object 'clojure.lang.IPersistentSet [?elem]]]
+    (return state-seq-m [::function (list [::arity (list ?elem) [::union (list [::nil] ?elem)]])])
+    
+    [(?target-class :guard symbol?) [::object ?source-class ?params]]
+    (if (= ?target-class ?source-class)
+      (return state-seq-m type)
+      (exec state-seq-m
+        [? (super-class? ?target-class ?source-class)
+         :let [_ (prn 'upcast/? ?)]
+         _ (if ?
+             (return state-seq-m nil)
+             zero)]
+        (upcast target-type [::object ?target-class []])))
+    ))
+
 (defn solve [expected actual]
   (prn 'solve expected actual)
   (match [expected actual]
@@ -165,7 +206,11 @@
 
     [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
     (exec state-seq-m
-      [? (super-class? ?class ?lit-class)]
+      [? (super-class? ?class ?lit-class)
+       :let [_ (prn "Object vs literal:" ?class ?lit-class ?)]
+       _ (fn [state]
+           (prn '? ? 'state state)
+           (list [state nil]))]
       (if ?
         (return state-seq-m true)
         zero))
@@ -178,7 +223,9 @@
                     (fn [[e a]] (solve e a))
                     (map vector ?e-params ?a-params))]
           (return state-seq-m true))
-        zero))
+        (exec state-seq-m
+          [=actual (upcast ?e-class actual)]
+          (solve expected =actual))))
 
     [[::union ?types] _]
     (exec state-seq-m

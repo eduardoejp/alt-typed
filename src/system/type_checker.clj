@@ -259,18 +259,23 @@
                 (fn [[arg input]]
                   (&util/with-field* :types
                     (&type/solve arg input)))
-                (map vector ?args =args))]
+                (map vector ?args =args))
+       :let [_ (prn 'check-arity =arity =args)]]
       (return state-seq-m ?return))))
 
 (defn ^:private fn-call [=fn =args]
   ;; (prn 'fn-call =fn =args)
-  (match =fn
-    [::&type/function ?arities]
-    (exec state-seq-m
-      [=arity (return-all (for [[_ args _ :as arity] ?arities
-                                :when (= (count args) (count =args))]
-                            arity))]
-      (check-arity =arity =args))))
+  (exec state-seq-m
+    [=fn (&type/upcast ::&type/$fn =fn)
+     :let [_ (prn 'fn-call '=fn =fn '=args =args)]]
+    (match =fn
+      [::&type/function ?arities]
+      (exec state-seq-m
+        [=arity (return-all (for [[_ args _ :as arity] ?arities
+                                  :when (= (count args) (count =args))]
+                              arity))
+         :let [_ (prn 'fn-call/=arity =arity)]]
+        (check-arity =arity =args)))))
 
 (defrecord ClassTypeCtor [class args])
 
@@ -698,11 +703,13 @@
         (return state-seq-m [::&type/nil])))
 
     [::&parser/fn-call ?fn ?args]
-    (do ;; (prn [::&parser/fn-call ?fn ?args])
+    (do (prn [::&parser/fn-call ?fn ?args])
         (exec state-seq-m
           [=fn (check* ?fn)
-           =args (map-m state-seq-m check* ?args)]
-          (fn-call =fn =args)))
+           =args (map-m state-seq-m check* ?args)
+           =return (fn-call =fn =args)
+           :let [_ (prn '=return =return)]]
+          (return state-seq-m =return)))
     ))
 
 ;; [Interface]

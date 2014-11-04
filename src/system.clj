@@ -158,8 +158,8 @@
                   x)))
 
             (java.lang.Object)
-            (do (ann-class java.lang.String [java.lang.Object])
-              (ann foo [java.lang.Object -> java.lang.Object])
+            (do ;; (ann-class java.lang.String [java.lang.Object])
+                (ann foo [java.lang.Object -> java.lang.Object])
               (foo "bar"))
 
             ((Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"]))
@@ -296,6 +296,21 @@
             (10)
             (do (ann defn Macro)
               10)
+
+            ([Map -> Any])
+            (fn _ [x]
+              (:yolo x))
+
+            (String)
+            (do (ann-class Object [])
+              (ann-class String [Object])
+              (ann-class Integer [Object])
+              (ann-class Collection [Object])
+              (ann-class Map [Collection])
+              (ann get-map [-> Map])
+              (ann coll->str [Collection -> String])
+              (coll->str (get-map))
+              )
             )))
 
   (run '(do (ann-class String [Object])
@@ -307,7 +322,7 @@
           (coll->str (get-map))))
 
   ;; MISSING: assert
-  ;; MISSING: Type conversions & treating objects as IFn (like keywords & maps)
+  ;; MISSING: polymorphic types
   ;; MISSING: records & tuples
   ;; MISSING: Destructuring
   ;; MISSING: Methods & fields for classes
