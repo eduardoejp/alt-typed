@@ -39,6 +39,12 @@
 
     [::&type/macro]
     'Macro
+
+    [::&type/tuple ?elems]
+    `(~'Tuple ~@(map type->code ?elems))
+
+    [::&type/record ?entries]
+    (into {} (for [[k v] ?entries] [(type->code k) (type->code v)]))
     
     [::&type/arity ?args ?return]
     `[~@(map type->code ?args) ~'-> ~(type->code ?return)]

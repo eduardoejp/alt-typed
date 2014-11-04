@@ -3,7 +3,7 @@
             (system [util :as &util :refer [state-seq-m exec
                                             map-m reduce-m
                                             zero return return-all]]
-                    [type :as &type]
+                    ;; [type :as &type]
                     [parser :as &parser]
                     [type-checker :as &type-checker]
                     [translator :as &translator]
@@ -103,16 +103,16 @@
             ((All [a] [a -> a]))
             (fn foo [x] x)
 
-            ((clojure.lang.IPersistentVector Nothing))
+            ((Tuple))
             []
 
-            ((clojure.lang.IPersistentMap Nothing Nothing))
+            ({})
             {}
 
             ((clojure.lang.IPersistentSet Nothing))
             #{}
 
-            ((clojure.lang.IPersistentVector (Or :klk "YOLO")))
+            ((Tuple :klk "YOLO"))
             [:klk "YOLO"]
             
             ([java.lang.String -> (Or nil java.lang.Long)])
@@ -311,6 +311,9 @@
               (ann coll->str [Collection -> String])
               (coll->str (get-map))
               )
+
+            ({:a 10 :b "YOLO"})
+            {:a 10 :b "YOLO"}
             )))
 
   (run '(do (ann-class String [Object])
@@ -323,7 +326,6 @@
 
   ;; MISSING: assert
   ;; MISSING: polymorphic types
-  ;; MISSING: records & tuples
   ;; MISSING: Destructuring
   ;; MISSING: Methods & fields for classes
   ;; MISSING: Java interop
@@ -358,8 +360,6 @@
             (if (< cnt 10)
               (recur (inc cnt))
               :done))))
-
-  (run '(fn foo [x] x))
 
   (run '(do (ann map? (Fn [Map -> true]
                           [(Not Map) -> false]))

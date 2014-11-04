@@ -7,6 +7,8 @@
                                             map-m reduce-m
                                             zero return return-all]])))
 
+(declare $or $and)
+
 ;; [Data]
 (defrecord TypeVars [counter mappings])
 (defrecord BoundTypes [counter mappings])
@@ -226,6 +228,41 @@
         (exec state-seq-m
           [=actual (upcast ?e-class actual)]
           (solve expected =actual))))
+
+    [[::tuple ?e-parts] [::tuple ?a-parts]]
+    (if (<= (count ?e-parts) (count ?a-parts))
+      (exec state-seq-m
+        [_ (map-m state-seq-m
+                  (fn [[e a]] (solve e a))
+                  (map vector ?e-parts ?a-parts))]
+        (return state-seq-m true))
+      zero)
+
+    [[::object ?e-class ?e-params] [::tuple ?a-parts]]
+    (exec state-seq-m
+      [=elems (if (empty? ?a-parts)
+                (return state-seq-m [::nothing])
+                ($or ?a-parts))]
+      (solve expected [::object 'clojure.lang.IPersistentVector [=elems]]))
+    
+    [[::object ?e-class ?e-params] [::record ?a-entries]]
+    (exec state-seq-m
+      [[=keys =vals] (if (empty? ?a-entries)
+                       (return state-seq-m [[::nothing] [::nothing]])
+                       (exec state-seq-m
+                         [=keys ($or (keys ?a-entries))
+                          =vals ($or (vals ?a-entries))]
+                         (return state-seq-m [=keys =vals])))]
+      (solve expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
+    
+    [[::record ?e-entries] [::record ?a-entries]]
+    (if (set/superset? (set (keys ?e-entries)) (set (keys ?a-entries)))
+      (exec state-seq-m
+        [_ (map-m state-seq-m
+                  (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
+                  (keys ?e-entries))]
+        (return state-seq-m true))
+      zero)
 
     [[::union ?types] _]
     (exec state-seq-m

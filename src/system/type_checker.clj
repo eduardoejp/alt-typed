@@ -341,16 +341,14 @@
     
     [::&parser/#vector ?value]
     (if (empty? ?value)
-      (return state-seq-m [::&type/object 'clojure.lang.IPersistentVector [[::&type/nothing]]])
+      (return state-seq-m [::&type/tuple []])
       (exec state-seq-m
-        [=elems (map-m state-seq-m check* ?value)
-         =elems (&util/with-field* :types
-                  (&type/$or (vec =elems)))]
-        (return state-seq-m [::&type/object 'clojure.lang.IPersistentVector [=elems]])))
+        [=elems (map-m state-seq-m check* ?value)]
+        (return state-seq-m [::&type/tuple (vec =elems)])))
 
     [::&parser/#map ?value]
     (if (empty? ?value)
-      (return state-seq-m [::&type/object 'clojure.lang.IPersistentMap [[::&type/nothing] [::&type/nothing]]])
+      (return state-seq-m [::&type/record {}])
       (exec state-seq-m
         [=elems (map-m state-seq-m
                        (fn [[?k ?v]]
@@ -358,12 +356,8 @@
                            [=k (check* ?k)
                             =v (check* ?v)]
                            (return state-seq-m [=k =v])))
-                       (seq ?value))
-         =k (&util/with-field* :types
-              (&type/$or (mapv first =elems)))
-         =v (&util/with-field* :types
-              (&type/$or (mapv second =elems)))]
-        (return state-seq-m [::&type/object 'clojure.lang.IPersistentMap [=k =v]])))
+                       (seq ?value))]
+        (return state-seq-m [::&type/record (into {} =elems)])))
 
     [::&parser/#set ?value]
     (if (empty? ?value)
