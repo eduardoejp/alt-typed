@@ -256,11 +256,11 @@
          *body (map-m state-seq-m parse ?body)]
         (return state-seq-m [::let *bindings `[::do ~@*body]])))
 
-    (['if ?test ?then & [?else]] :seq)
+    (['if ?test ?then & &?else] :seq)
     (exec state-seq-m
       [*test (parse ?test)
        *then (parse ?then)
-       *else (parse ?else)]
+       *else (parse (first &?else))]
       (return state-seq-m [::if *test *then *else]))
 
     (['case ?value & ?clauses] :seq)
@@ -304,16 +304,14 @@
       [*args (map-m state-seq-m parse ?args)]
       (return state-seq-m [::recur (vec *args)]))
 
-    (['assert ?test & [?message]] :seq)
+    (['assert ?test & &?message] :seq)
     (exec state-seq-m
       [*test (parse ?test)
-       *message (if ?message
-                  (parse ?message)
-                  (return state-seq-m nil))]
+       *message (parse (first &?message))]
       (return state-seq-m [::assert *test *message]))
     
     (['def (?var :guard symbol?)] :seq)
-    (return state-seq-m [::def ?var])
+    (return state-seq-m [::def ?var nil])
     
     (['def (?var :guard symbol?) ?value] :seq)
     (exec state-seq-m

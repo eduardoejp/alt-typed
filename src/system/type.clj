@@ -90,20 +90,22 @@
       (list [state type]))))
 
 ;; Monads / Classes
-(defn define-class [class parents]
+(let [qualify-class #(symbol "java::class" (name %))]
+ (defn define-class [class parents]
   (fn [^Types state]
+    (prn 'define-class class parents (.-class-hierarchy state))
     ;; (prn '(defined? (.-class-hierarchy state) (nth class 0)) (defined? (.-class-hierarchy state) (nth class 0)))
     (when (not (defined? (.-class-hierarchy state) (nth class 0)))
-      (let [class-name (symbol "java::class" (name (nth class 0)))
+      (let [class-name (qualify-class (nth class 0))
             ;; _ (prn 'parents parents '(map first parents) (map first parents))
-            hierarchy* (reduce #(derive %1 class-name (symbol "java::class" (name %2)))
+            hierarchy* (reduce #(derive %1 class-name %2)
                                (.-class-hierarchy state)
-                               (map first parents))]
+                               (map (comp qualify-class first) parents))]
         ;; (prn '(.-class-hierarchy state) (.-class-hierarchy state))
-        ;; (prn 'hierarchy* hierarchy*)
-        (list [(assoc state :hierarchy hierarchy*) nil])
+        (prn 'hierarchy* (mapv (comp qualify-class first) parents) hierarchy*)
+        (list [(assoc state :class-hierarchy hierarchy*) nil])
         ))
-    ))
+    )))
 
 (defn super-class? [super sub]
   ;; (prn 'super-class? super sub)

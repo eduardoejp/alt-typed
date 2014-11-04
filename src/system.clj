@@ -6,7 +6,8 @@
                     [type :as &type]
                     [parser :as &parser]
                     [type-checker :as &type-checker]
-                    [translator :as &translator])
+                    [translator :as &translator]
+                    [prelude :as &prelude])
             ;; :reload-all
             :reload
             ))
@@ -16,17 +17,19 @@
               (do (alter-var-root #'clojure.core/prn
                                   (constantly #(.println System/out (apply pr-str %&))))))
           
-          (defn run [code]
-            (println "Code:" (pr-str code))
-            (let [monad (exec state-seq-m
-                          [parsed-code (&parser/parse code)]
-                          (&type-checker/check parsed-code))
-                  types (map (comp &translator/type->code second)
-                             (monad &type-checker/+init+))]
-              (doseq [type types]
-                (->> type pr-str (println "Type:")))
-              (println "")
-              types))
+          (let [[[context _]] (&prelude/install &type-checker/+init+)]
+            (prn 'context context)
+            (defn run [code]
+              (println "Code:" (pr-str code))
+              (let [monad (exec state-seq-m
+                            [parsed-code (&parser/parse code)]
+                            (&type-checker/check parsed-code))
+                    types (map (comp &translator/type->code second)
+                               (monad context))]
+                (doseq [type types]
+                  (->> type pr-str (println "Type:")))
+                (println "")
+                types)))
           
           (do-template [<type> <form>]
             (assert (= '<type> (run '<form>)))
@@ -304,8 +307,6 @@
           (coll->str (get-map))))
 
   ;; MISSING: assert
-  ;; MISSING: ns management
-  ;; MISSING: prelude
   ;; MISSING: Type conversions & treating objects as IFn (like keywords & maps)
   ;; MISSING: records & tuples
   ;; MISSING: Destructuring
@@ -318,8 +319,12 @@
   ;; MISSING: var-args
   ;; MISSING: macro-expansion.
   ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
+  ;; MISSING: Automatically generate Class types when doing unannotated host interop.
   ;; MISSING: covariance, contravariance & invariance.
-  
+  ;; MISSING: Scope handling (public vs private)
+  ;; MISSING: Clojure type tags.
+  ;; MISSING: Interact with Java reflection & Clojure type annotations.
+  ;; MISSING: Recursive types
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.

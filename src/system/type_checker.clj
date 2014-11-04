@@ -6,8 +6,7 @@
                                             zero return return-all]]
                     [env :as &env]
                     [type :as &type]
-                    [parser :as &parser]
-                    [ns :as &ns]))
+                    [parser :as &parser]))
   (:import (system.env Env)))
 
 ;; [Data]
@@ -273,7 +272,21 @@
                             arity))]
       (check-arity =arity =args))))
 
-(defn check* [form]
+(defrecord ClassTypeCtor [class args])
+
+(defn qualify [prefix body]
+  (symbol (name prefix) (name body)))
+
+(defn ^:private ann-class [class parents]
+  (exec state-seq-m
+    [:let [class+ [::&type/class class]]
+     ns (&util/with-field :env
+          &env/current-ns)
+     _ (&util/with-field* :types
+         (&type/define-class (qualify ns (:class class)) (map :class parents)))]
+    (return state-seq-m [::&type/nil])))
+
+(defn ^:private check* [form]
   (prn 'check* form)
   (match form
     [::&parser/#nil]
@@ -542,19 +555,15 @@
                           (&util/with-field* :types
                             (&type/solve [::&type/object 'java.lang.Boolean []] =test))])]
       (return state-seq-m [::&type/nothing]))
-
-    [::&parser/def ?var]
-    (exec state-seq-m
-      [:let [=value [::&type/nothing]]
-       _ (&util/with-field :env
-           (&env/annotate ?var =value))]
-      (return state-seq-m [::&type/object 'clojure.lang.Var [=value]]))
-
+    
     [::&parser/def ?var ?value]
     (exec state-seq-m
-      [=value (check* ?value)
+      [=value (if ?value
+                (check* ?value)
+                (return state-seq-m [::&type/nothing]))
+       :let [_ (prn '=value =value)]
        _ (&util/with-field :env
-           (&env/annotate ?var =value))]
+           (&env/intern ?var =value))]
       (return state-seq-m [::&type/object 'clojure.lang.Var [=value]]))
 
     [::&parser/var ?var]
@@ -664,20 +673,20 @@
 
     [::&parser/ann ?var ?type]
     (do ;; (prn `[::&parser/ann ~?var ~?type])
-      (exec state-seq-m
-        [_ (&util/with-field :env
-             (&env/annotate ?var ?type))
-         ;; :let [_ (println "ANNOTATED:" ?var ?type)]
-         ]
-        (return state-seq-m [::&type/nil])))
+        (exec state-seq-m
+          [_ (&util/with-field :env
+               (&env/intern ?var ?type))
+           ;; :let [_ (println "ANNOTATED:" ?var ?type)]
+           ]
+          (return state-seq-m [::&type/nil])))
 
     [::&parser/ann-class ?class ?parents]
     (do ;; (prn [::&parser/ann-class ?class ?parents])
-      (exec state-seq-m
-        [_ (&util/with-field* :types
-             (&type/define-class ?class ?parents))]
-        (do ;; (println "DONE ANNOTATING")
-          (return state-seq-m [::&type/nil]))))
+        (exec state-seq-m
+          [_ (&util/with-field* :types
+               (&type/define-class ?class ?parents))]
+          (do ;; (println "DONE ANNOTATING")
+              (return state-seq-m [::&type/nil]))))
 
     [::&parser/defalias ?name ?params ?type-def]
     (let [=type (if (empty? ?params)
@@ -690,10 +699,10 @@
 
     [::&parser/fn-call ?fn ?args]
     (do ;; (prn [::&parser/fn-call ?fn ?args])
-      (exec state-seq-m
-        [=fn (check* ?fn)
-         =args (map-m state-seq-m check* ?args)]
-        (fn-call =fn =args)))
+        (exec state-seq-m
+          [=fn (check* ?fn)
+           =args (map-m state-seq-m check* ?args)]
+          (fn-call =fn =args)))
     ))
 
 ;; [Interface]
