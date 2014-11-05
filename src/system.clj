@@ -303,14 +303,11 @@
             (fn _ [x]
               (:yolo x))
 
-            (String)
-            (do (ann-class Object [])
-              (ann-class String [Object])
-              (ann-class Integer [Object])
-              (ann-class Collection [Object])
-              (ann-class Map [Collection])
-              (ann get-map [-> Map])
-              (ann coll->str [Collection -> String])
+            (java.lang.String)
+            (do (ann-class java.lang.Collection [java.lang.Object])
+              (ann-class java.lang.Map [java.lang.Collection])
+              (ann get-map [-> java.lang.Map])
+              (ann coll->str [java.lang.Collection -> java.lang.String])
               (coll->str (get-map)))
 
             ({:a 10 :b "YOLO"})
@@ -319,18 +316,25 @@
             ("YOLO")
             (do (ann identity (All [x] [x -> x]))
               (identity "YOLO"))
+
+            (java.lang.String)
+            (do (ann-class (java.lang.Collection x) [java.lang.Object])
+              (ann-class (java.lang.KV key val) [java.lang.Object])
+              (ann-class (java.lang.Map key val) [(java.lang.Collection (java.lang.KV key val))])
+              (ann get-map [-> (java.lang.Map String Integer)])
+              (ann coll->str (All [key val]
+                                  [(java.lang.Collection (java.lang.KV key val)) -> java.lang.String]))
+              (coll->str (get-map)))
+
+            ((java.lang.Collection (java.lang.KV String Integer)))
+            (do (ann-class (java.lang.Collection x) [java.lang.Object])
+              (ann-class (java.lang.KV key val) [java.lang.Object])
+              (ann-class (java.lang.Map key val) [(java.lang.Collection (java.lang.KV key val))])
+              (ann get-map [-> (java.lang.Map String Integer)])
+              (ann ->coll (All [key val]
+                               [(java.lang.Map key val) -> (java.lang.Collection (java.lang.KV key val))]))
+              (->coll (get-map)))
             )))
-
-  (run '(do (ann-class String [Object])
-          (ann-class Integer [Object])
-          (ann-class (Collection x) [Object])
-          (ann-class (Map key val) [(Collection (KV key val))])
-          (ann get-map [-> (Map String Integer)])
-          (ann coll->str [(Collection (KV key val)) -> String])
-          (coll->str (get-map))))
-
-  (run '(do (ann identity (All [x] [x -> x]))
-          (identity "YOLO")))
 
   ;; MISSING: assert
   ;; MISSING: Destructuring

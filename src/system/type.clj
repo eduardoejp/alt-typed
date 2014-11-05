@@ -7,12 +7,12 @@
                                             map-m reduce-m
                                             zero return return-all]])))
 
-(declare $or $and)
+(declare $or $and apply)
 
 ;; [Data]
 (defrecord TypeVars [counter mappings])
 (defrecord BoundTypes [counter mappings])
-(defrecord Types [db vars bound class-hierarchy])
+(defrecord Types [db vars bound class-hierarchy casts])
 
 ;; [Utils]
 (defn ^:private defined? [hierarchy class]
@@ -25,7 +25,7 @@
 (def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
 (def +truthy+ [::complement +falsey+])
 
-(def +init+ (Types. {} (TypeVars. 0 {}) (BoundTypes. 0 {}) (make-hierarchy)))
+(def +init+ (Types. {} (TypeVars. 0 {}) (BoundTypes. 0 {}) (make-hierarchy) {}))
 
 ;; Monads / vars
 (def fresh-var
@@ -94,23 +94,35 @@
 (defn ^:private qualify-class [class]
   (symbol "java::class" (name class)))
 
-(defn define-class [class parents]
-  (fn [^Types state]
-    ;; (prn '(defined? (.-class-hierarchy state) (nth class 0)) (defined? (.-class-hierarchy state) (nth class 0)))
-    (let [class-name (qualify-class (nth class 0))]
-      ;; (prn 'define-class class-name (defined? (.-class-hierarchy state) class-name) (.-class-hierarchy state))
-      (if (not (defined? (.-class-hierarchy state) class-name))
-        (let [;; _ (prn 'parents parents '(map first parents) (map first parents))
-              hierarchy* (reduce #(derive %1 class-name %2)
-                                 (.-class-hierarchy state)
-                                 (map (comp qualify-class first) parents))]
-          ;; (prn '(.-class-hierarchy state) (.-class-hierarchy state))
-          ;; (prn 'hierarchy* (mapv (comp qualify-class first) parents) hierarchy*)
-          (list [(assoc state :class-hierarchy hierarchy*) nil]))
-        '()))
-    ))
+(defn define-class [[class params] parents]
+  (&util/parallel [(exec state-seq-m
+                     [_ (resolve class)]
+                     zero)
+                   (exec state-seq-m
+                     [_ (if (empty? params)
+                          (define-type class [::object class []])
+                          (define-type class [::all params [::object class params]]))]
+                     (fn [^Types state]
+                       ;; (prn '(defined? (.-class-hierarchy state) (nth class 0)) (defined? (.-class-hierarchy state) (nth class 0)))
+                       (let [class-name (qualify-class class)]
+                         ;; (prn 'define-class class-name (defined? (.-class-hierarchy state) class-name) (.-class-hierarchy state))
+                         (if (not (defined? (.-class-hierarchy state) class-name))
+                           (let [;; _ (prn 'parents parents '(map first parents) (map first parents))
+                                 hierarchy* (reduce #(derive %1 class-name %2)
+                                                    (.-class-hierarchy state)
+                                                    (for [[_ class _] parents] (qualify-class class)))]
+                             ;; (prn '(.-class-hierarchy state) (.-class-hierarchy state))
+                             ;; (prn 'hierarchy* (mapv (comp qualify-class first) parents) hierarchy*)
+                             (list [(-> state
+                                        (assoc :class-hierarchy hierarchy*)
+                                        (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
+                                                                                 [p-class [::all params [::object p-class p-params]]])
+                                                                               parents))))
+                                    nil]))
+                           '()))
+                       ))]))
 
-(defn super-class? [super sub]
+(defn ^:private super-class? [super sub]
   (fn [^Types state]
     ;; (prn 'super-class?/state state)
     (let [hierarchy (.-class-hierarchy state)]
@@ -132,9 +144,29 @@
                         (defined? hierarchy sub)
                         (isa? hierarchy (qualify-class sub) (qualify-class super)))]))))
 
+(defn ^:private lineage* [hierarchy from to]
+  (for [parent (get-in hierarchy [:parents from])
+        member (cond (= to parent)
+                     (list parent)
+                     
+                     (get-in hierarchy [:ancestors parent to])
+                     (cons parent (lineage* parent to))
+                     
+                     :else
+                     '())]
+    member))
+
+(defn ^:private lineage [from to]
+  (let [from* (qualify-class from)
+        to* (qualify-class to)]
+    (fn [^Types state]
+      (list [state (mapv (comp symbol name)
+                         (lineage* (.-class-hierarchy state) (qualify-class from) (qualify-class to)))]))
+    ))
+
 ;; Monads / Solving
 (defn upcast [target-type type]
-  ;; (prn 'upcast target-type type)
+  (prn 'upcast target-type type)
   (match [target-type type]
     [::$fn [::function ?arities]]
     (return state-seq-m type)
@@ -162,8 +194,29 @@
          ;; :let [_ (prn 'upcast/? ?)]
          _ (if ?
              (return state-seq-m nil)
-             zero)]
-        (upcast target-type [::object ?target-class []])))
+             zero)
+         family-line (lineage ?source-class ?target-class)
+         :let [;; matches (map vector
+               ;;              (cons ?source-class family-line)
+               ;;              family-line)
+               _ (prn 'family-line family-line)
+               ;; _ (prn 'matches matches)
+               ]
+         ^Types types &util/get-state
+         :let [casts (.-casts types)
+               _ (prn 'casts casts)]]
+        (reduce-m state-seq-m
+                  (fn [current next-class]
+                    (match current
+                      [::object ?current-class ?params]
+                      (let [_ (prn `(~'get-in ~'casts [~?current-class ~next-class]) (get-in casts [?current-class next-class]))
+                            _ (prn `(~'get-in ~'casts [~?current-class]) (get-in casts [?current-class]))
+                            =type-fn (get-in casts [?current-class next-class])]
+                        (apply =type-fn ?params))))
+                  type
+                  family-line)
+        ;; (upcast target-type [::object ?target-class []])
+        ))
     ))
 
 (defn solve [expected actual]
@@ -231,15 +284,15 @@
 
     [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
     (do ;; (prn [::object ?e-class ?e-params] [::object ?a-class ?a-params])
-      (if (= ?e-class ?a-class)
-        (exec state-seq-m
-          [_ (map-m state-seq-m
-                    (fn [[e a]] (solve e a))
-                    (map vector ?e-params ?a-params))]
-          (return state-seq-m true))
-        (exec state-seq-m
-          [=actual (upcast ?e-class actual)]
-          (solve expected =actual))))
+        (if (= ?e-class ?a-class)
+          (exec state-seq-m
+            [_ (map-m state-seq-m
+                      (fn [[e a]] (solve e a))
+                      (map vector ?e-params ?a-params))]
+            (return state-seq-m true))
+          (exec state-seq-m
+            [=actual (upcast ?e-class actual)]
+            (solve expected =actual))))
 
     [[::tuple ?e-parts] [::tuple ?a-parts]]
     (if (<= (count ?e-parts) (count ?a-parts))
@@ -342,12 +395,14 @@
     ))
 
 (defn apply [type-fn params]
+  (prn 'apply type-fn params)
   (match type-fn
     [::all ?params ?type-def]
     (if (= (count ?params) (count params))
       (realize (into {} (map vector ?params params))
                ?type-def)
       zero)
+    
     :else
     zero))
 
@@ -360,6 +415,23 @@
     
     :else
     (return state-seq-m type)))
+
+(defn ^:private type-fn? [type]
+  (match type
+    [::all _ _]
+    true
+    
+    :else
+    false))
+
+(defn instantiate* [name params]
+  (prn 'instantiate* name params)
+  (exec state-seq-m
+    [=type-fn (resolve name)
+     :let [_ (prn '=type-fn)]]
+    (if (type-fn? =type-fn)
+      (apply =type-fn params)
+      (return state-seq-m =type-fn))))
 
 ;; Monads / Types
 (do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]

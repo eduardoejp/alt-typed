@@ -326,7 +326,7 @@
     (return state-seq-m [::&type/nil])))
 
 (defn ^:private check* [form]
-  ;; (prn 'check* form)
+  (prn 'check* form)
   (match form
     [::&parser/#nil]
     (return state-seq-m [::&type/nil])
@@ -411,14 +411,22 @@
         zero))
     
     [::&parser/do & ?forms]
-    (case (count ?forms)
-      0 (return state-seq-m [::&type/nil])
-      1 (check* (first ?forms))
-      ;; else
-      (exec state-seq-m
-        [=forms (map-m state-seq-m check* ?forms)
-         =body (&type/sequentially-combine-types =forms)]
-        (return state-seq-m =body)))
+    (do (prn [::&parser/do ?forms])
+      (case (count ?forms)
+        0 (return state-seq-m [::&type/nil])
+        1 (exec state-seq-m
+            [?form (&parser/parse (first ?forms))]
+            (check* ?form))
+        ;; else
+        (exec state-seq-m
+          [=forms (map-m state-seq-m
+                         (fn [?form]
+                           (exec state-seq-m
+                             [?form (&parser/parse ?form)]
+                             (check* ?form)))
+                         ?forms)
+           =body (&type/sequentially-combine-types =forms)]
+          (return state-seq-m =body))))
 
     [::&parser/let ([[?label ?value] & ?bindings] :seq) ?body]
     (exec state-seq-m
@@ -596,7 +604,9 @@
        _ (&util/parallel [(&util/with-field* :types
                             (&type/solve &type/+truthy+ =test))
                           (&util/with-field* :types
-                            (&type/solve [::&type/object 'java.lang.Boolean []] =test))])]
+                            (exec state-seq-m
+                              [=boolean (&type/instantiate* 'java.lang.Boolean [])]
+                              (&type/solve =boolean =test)))])]
       (return state-seq-m [::&type/nothing]))
     
     [::&parser/def ?var ?value]
@@ -607,19 +617,23 @@
        ;; :let [_ (prn '=value =value)]
        _ (&util/with-field :env
            (&env/intern ?var =value))]
-      (return state-seq-m [::&type/object 'clojure.lang.Var [=value]]))
+      (&util/with-field* :types
+        (&type/instantiate* 'clojure.lang.Var [=value])))
 
     [::&parser/var ?var]
     (exec state-seq-m
-      [=var (&util/with-field :env
-              (&env/resolve-var ?var))]
-      (return state-seq-m [::&type/object 'clojure.lang.Var [=var]]))
+      [=value (&util/with-field :env
+                (&env/resolve-var ?var))]
+      (&util/with-field* :types
+        (&type/instantiate* 'clojure.lang.Var [=value])))
 
     [::&parser/throw ?ex]
     (exec state-seq-m
       [=ex (check* ?ex)
        _ (&util/with-field* :types
-           (&type/solve [::&type/object 'java.lang.Exception []] =ex))]
+           (exec state-seq-m
+             [=exception (&type/instantiate* 'java.lang.Exception [])]
+             (&type/solve =exception =ex)))]
       (return state-seq-m [::&type/eff [::&type/nothing] {:try =ex}]))
     
     [::&parser/try ?body ?catches ?finally]
@@ -725,10 +739,12 @@
           (return state-seq-m [::&type/nil])))
 
     [::&parser/ann-class ?class ?parents]
-    (do ;; (prn [::&parser/ann-class ?class ?parents])
+    (do (prn [::&parser/ann-class ?class ?parents])
         (exec state-seq-m
           [_ (&util/with-field* :types
-               (&type/define-class ?class ?parents))]
+               (&type/define-class ?class ?parents))
+           state &util/get-state
+           :let [_ (prn (:types state))]]
           (do ;; (println "DONE ANNOTATING")
               (return state-seq-m [::&type/nil]))))
 

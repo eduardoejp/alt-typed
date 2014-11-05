@@ -27,7 +27,7 @@
 (defn ^:private parse-type-ctor [ctor]
   (if (symbol? ctor)
     [ctor []]
-    [(first ctor) (mapv parse-type-ctor (rest ctor))]))
+    [(first ctor) (vec (rest ctor))]))
 
 (defn ^:private parse-arity [parse-type-def type-def]
   ;; (prn 'parse-arity type-def)
@@ -128,8 +128,12 @@
     
     (?name :guard symbol?)
     (do ;; (prn '(?name :guard symbol?) `(~?name :guard ~'symbol?))
-        (&util/parallel [(&util/with-field* :types
-                           (&types/resolve ?name))
+        (&util/parallel [(exec state-seq-m
+                           [state (&util/with-field* :types
+                                    &util/get-state)
+                            :let [_ (prn 'parse-type-def/symbol ?name (get-in state [:db ?name]) (get-in state [:db]))]]
+                           (&util/with-field* :types
+                             (&types/resolve ?name)))
                          (return state-seq-m ?name)]))
     
     [& ?parts]
@@ -169,7 +173,7 @@
 
 ;; Functions
 (defn parse [code]
-  ;; (prn 'parse code)
+  (prn 'parse code)
   (match code
     nil
     (return state-seq-m [::#nil])
@@ -246,9 +250,7 @@
             (parse (seq (map (fn [x] `(quote ~x)) ?quoted)))))
     
     (['do & ?forms] :seq)
-    (exec state-seq-m
-      [*forms (map-m state-seq-m parse ?forms)]
-      (return state-seq-m `[::do ~@*forms]))
+    (return state-seq-m `[::do ~@?forms])
 
     (['let (?bindings :guard vector?) & ?body] :seq)
     (do (assert (even? (count ?bindings)) "LET must have an even number of elements.")
@@ -260,8 +262,8 @@
                                *value (parse ?value)]
                               (return state-seq-m [*label *value])))
                           (partition 2 ?bindings))
-         *body (map-m state-seq-m parse ?body)]
-        (return state-seq-m [::let *bindings `[::do ~@*body]])))
+         *body (parse `(do ~@ ?body))]
+        (return state-seq-m [::let *bindings *body])))
 
     (['if ?test ?then & &?else] :seq)
     (exec state-seq-m
@@ -305,8 +307,8 @@
                              *value (parse ?value)]
                             (return state-seq-m [*label *value])))
                         (partition 2 ?bindings))
-       *body (map-m state-seq-m parse ?body)]
-      (return state-seq-m [::let *bindings [::loop locals `[::do ~@*body]]]))
+       *body (parse `(do ~@ ?body))]
+      (return state-seq-m [::let *bindings [::loop locals *body]]))
 
     (['recur & ?args] :seq)
     (exec state-seq-m
@@ -346,17 +348,17 @@
                                                         (-> expr first (= 'finally)))))
                                             ?sub-exprs)]
       (exec state-seq-m
-        [*body (map-m state-seq-m parse ?body)
+        [*body (parse `(do ~@ ?body))
          *catches (map-m state-seq-m parse ?catches)
          *finally (exec state-seq-m
-                    [*finally (map-m state-seq-m parse (rest ?finally))]
-                    (return state-seq-m `[::do ~@*finally]))]
-        (return state-seq-m [::try `[::do ~@*body] (vec *catches) *finally])))
+                    [*finally (parse `(do ~@(rest ?finally)))]
+                    (return state-seq-m *finally))]
+        (return state-seq-m [::try *body (vec *catches) *finally])))
 
     (['catch (?class :guard symbol?) (?var :guard symbol?) & ?body] :seq)
     (exec state-seq-m
-      [*body (map-m state-seq-m parse ?body)]
-      (return state-seq-m [::catch ?class ?var `[::do ~@*body]]))
+      [*body (parse `(do ~@ ?body))]
+      (return state-seq-m [::catch ?class ?var *body]))
 
     (['monitor-enter ?object] :seq)
     (exec state-seq-m
@@ -377,8 +379,8 @@
                              *value (parse value)]
                             (return state-seq-m [*label *value])))
                         (partition 2 ?bindings))
-       *body (map-m state-seq-m parse ?body)]
-      (return state-seq-m [::binding *bindings `[::do ~@*body]]))
+       *body (parse `(do ~@ ?body))]
+      (return state-seq-m [::binding *bindings *body]))
     
     (['ann (?var :guard symbol?) ?type-def] :seq)
     (do ;; (prn `[~'ann ~?var ~?type-def])
@@ -392,9 +394,9 @@
     (exec state-seq-m
       [:let [*type-ctor (parse-type-ctor ?class)
              ;; _ (prn '*type-ctor *type-ctor)
-             *parents (map parse-type-ctor ?parents)
              ;; _ (prn '*parents *parents)
-             ]]
+             ]
+       *parents (map-m state-seq-m parse-type-def ?parents)]
       (return state-seq-m [::ann-class *type-ctor (vec *parents)]))
 
     (['defalias (?ctor :guard type-ctor?) ?type-def] :seq)
@@ -405,8 +407,8 @@
 
     (['fn ?local-name (?args :guard vector?) & ?body] :seq)
     (exec state-seq-m
-      [*body (map-m state-seq-m parse ?body)]
-      (return state-seq-m [::fn ?local-name ?args `[::do ~@*body]]))
+      [*body (parse `(do ~@ ?body))]
+      (return state-seq-m [::fn ?local-name ?args *body]))
 
     ([?fn & ?args] :seq)
     (exec state-seq-m
