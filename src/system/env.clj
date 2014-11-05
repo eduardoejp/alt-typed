@@ -98,13 +98,13 @@
 ;; Monads / Symbol Resolution
 (defn resolve-var [symbol]
   (fn [^Env state]
-    (prn 'resolve-var symbol (-> state ^NS (.-ns-current) .-all-symbols))
+    ;; (prn 'resolve-var symbol (-> state ^NS (.-ns-current) .-all-symbols))
     (when-let [=type (-> state ^NS (.-ns-current) .-all-symbols (get symbol))]
       [state =type])))
 
 (defn resolve [symbol]
   (fn [^Env state]
-    (prn 'resolve symbol)
+    ;; (prn 'resolve symbol)
     (if-let [=type (->> state .-stack (some symbol))]
       [state =type]
       ((resolve-var symbol) state))))

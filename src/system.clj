@@ -18,7 +18,7 @@
                                   (constantly #(.println System/out (apply pr-str %&))))))
           
           (let [[[context _]] (&prelude/install &type-checker/+init+)]
-            (prn 'context context)
+            ;; (prn 'context context)
             (defn run [code]
               (println "Code:" (pr-str code))
               (let [monad (exec state-seq-m
@@ -101,7 +101,7 @@
                   "YOLO")))
 
             ((All [a] [a -> a]))
-            (fn foo [x] x)
+            (fn id [x] x)
 
             ((Tuple))
             []
@@ -162,7 +162,9 @@
                 (ann foo [java.lang.Object -> java.lang.Object])
               (foo "bar"))
 
-            ((Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"]))
+            ((Fn [1 -> "YOLO"]
+                 ["2" -> "LOL"]
+                 [:3 -> "MEME"]))
             (fn case-test [x]
               (case x
                 1   "YOLO"
@@ -309,11 +311,14 @@
               (ann-class Map [Collection])
               (ann get-map [-> Map])
               (ann coll->str [Collection -> String])
-              (coll->str (get-map))
-              )
+              (coll->str (get-map)))
 
             ({:a 10 :b "YOLO"})
             {:a 10 :b "YOLO"}
+
+            ("YOLO")
+            (do (ann identity (All [x] [x -> x]))
+              (identity "YOLO"))
             )))
 
   (run '(do (ann-class String [Object])
@@ -324,23 +329,25 @@
           (ann coll->str [(Collection (KV key val)) -> String])
           (coll->str (get-map))))
 
+  (run '(do (ann identity (All [x] [x -> x]))
+          (identity "YOLO")))
+
   ;; MISSING: assert
-  ;; MISSING: polymorphic types
   ;; MISSING: Destructuring
   ;; MISSING: Methods & fields for classes
   ;; MISSING: Java interop
-  
+  ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
+  ;; MISSING: Automatically generate Class types when doing unannotated host interop.
+  ;; MISSING: Clojure type tags.
+  ;; MISSING: Interact with Java reflection & Clojure type annotations.
+  ;; MISSING: var-args
+  ;; MISSING: macro-expansion.
+  ;; MISSING: Scope handling (public vs private)
+
   ;; MISSING: def(protocol|type|record), proxy & reify
   ;; MISSING: multimethods
   ;; MISSING: gen-class
-  ;; MISSING: var-args
-  ;; MISSING: macro-expansion.
-  ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
-  ;; MISSING: Automatically generate Class types when doing unannotated host interop.
   ;; MISSING: covariance, contravariance & invariance.
-  ;; MISSING: Scope handling (public vs private)
-  ;; MISSING: Clojure type tags.
-  ;; MISSING: Interact with Java reflection & Clojure type annotations.
   ;; MISSING: Recursive types
   
   ;; The one below is not supposed to type-check due to lack of

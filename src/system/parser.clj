@@ -128,8 +128,9 @@
     
     (?name :guard symbol?)
     (do ;; (prn '(?name :guard symbol?) `(~?name :guard ~'symbol?))
-        (&util/with-field* :types
-          (&types/resolve ?name)))
+        (&util/parallel [(&util/with-field* :types
+                           (&types/resolve ?name))
+                         (return state-seq-m ?name)]))
     
     [& ?parts]
     (do ;; (prn '[& ?parts])
@@ -144,17 +145,22 @@
       [=arities (map-m state-seq-m (partial parse-arity parse-type-def) ?arities)]
       (return state-seq-m [::&types/function (vec =arities)]))
 
+    (['All (?params :guard (every-pred vector? (partial every? symbol?))) ?def] :seq)
+    (exec state-seq-m
+      [*def (parse-type-def ?def)]
+      (return state-seq-m [::&types/all ?params *def]))
+
     ([?fn & ?params] :seq)
     (do ;; (prn '[?fn & ?params] [?fn ?params])
         (exec state-seq-m
-          [=type-fn (do (prn '?fn ?fn)
+          [=type-fn (do ;; (prn '?fn ?fn)
                       (&util/with-field* :types
                         (&types/resolve ?fn)))
            ;; :let [_ (prn '=type-fn =type-fn)]
            =params (map-m state-seq-m parse-type-def ?params)
            ;; :let [_ (prn '=params =params)]
            ]
-          (&types/fn-call =type-fn =params)))
+          (&types/apply =type-fn =params)))
     
     ;; :else
     ;; (do (prn 'parse-type-def/else)
@@ -218,7 +224,7 @@
       (return state-seq-m [::#set (set *value)]))
 
     (['quote ?quoted] :seq)
-    (do (prn '?quoted ?quoted (seq? ?quoted) (atom? ?quoted))
+    (do ;; (prn '?quoted ?quoted (seq? ?quoted) (atom? ?quoted))
       (cond (symbol? ?quoted)
             (return state-seq-m [::#symbol ?quoted])
 
@@ -250,8 +256,9 @@
         [*bindings (map-m state-seq-m
                           (fn [[?label ?value]]
                             (exec state-seq-m
-                              [*value (parse ?value)]
-                              (return state-seq-m [?label *value])))
+                              [*label (parse ?label)
+                               *value (parse ?value)]
+                              (return state-seq-m [*label *value])))
                           (partition 2 ?bindings))
          *body (map-m state-seq-m parse ?body)]
         (return state-seq-m [::let *bindings `[::do ~@*body]])))
@@ -269,7 +276,8 @@
        :let [[?clauses ?default] [(partition 2 ?clauses) (if (even? (count ?clauses))
                                                            nil
                                                            (last ?clauses))]
-             _ (prn '[?clauses ?default] [?clauses ?default])]
+             ;; _ (prn '[?clauses ?default] [?clauses ?default])
+             ]
        *clauses (map-m state-seq-m
                        (fn [[?value ?form]]
                          (exec state-seq-m
@@ -293,8 +301,9 @@
        *bindings (map-m state-seq-m
                         (fn [[?label ?value]]
                           (exec state-seq-m
-                            [*value (parse ?value)]
-                            (return state-seq-m [?label *value])))
+                            [*label (parse ?label)
+                             *value (parse ?value)]
+                            (return state-seq-m [*label *value])))
                         (partition 2 ?bindings))
        *body (map-m state-seq-m parse ?body)]
       (return state-seq-m [::let *bindings [::loop locals `[::do ~@*body]]]))

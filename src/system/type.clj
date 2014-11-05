@@ -1,5 +1,5 @@
 (ns system.type
-  (:refer-clojure :exclude [resolve])
+  (:refer-clojure :exclude [resolve apply])
   (:require (clojure [set :as set]
                      [template :refer [do-template]])
             [clojure.core.match :refer [match]]
@@ -87,8 +87,7 @@
 (defn resolve [type-name]
   (fn [^Types state]
     ;; (prn `resolve type-name state)
-    (when-let [type (or (-> state .-db (get type-name))
-                        [::object type-name []])]
+    (when-let [type (-> state .-db (get type-name))]
       (list [state type]))))
 
 ;; Monads / Classes
@@ -99,14 +98,14 @@
   (fn [^Types state]
     ;; (prn '(defined? (.-class-hierarchy state) (nth class 0)) (defined? (.-class-hierarchy state) (nth class 0)))
     (let [class-name (qualify-class (nth class 0))]
-      (prn 'define-class class-name (defined? (.-class-hierarchy state) class-name) (.-class-hierarchy state))
+      ;; (prn 'define-class class-name (defined? (.-class-hierarchy state) class-name) (.-class-hierarchy state))
       (if (not (defined? (.-class-hierarchy state) class-name))
         (let [;; _ (prn 'parents parents '(map first parents) (map first parents))
               hierarchy* (reduce #(derive %1 class-name %2)
                                  (.-class-hierarchy state)
                                  (map (comp qualify-class first) parents))]
           ;; (prn '(.-class-hierarchy state) (.-class-hierarchy state))
-          (prn 'hierarchy* (mapv (comp qualify-class first) parents) hierarchy*)
+          ;; (prn 'hierarchy* (mapv (comp qualify-class first) parents) hierarchy*)
           (list [(assoc state :class-hierarchy hierarchy*) nil]))
         '()))
     ))
@@ -120,22 +119,22 @@
       ;;      (defined? hierarchy sub)
       ;;      (isa? hierarchy (symbol "java::class" (name super)) (symbol "java::class" (name sub)))
       ;;      hierarchy)
-      (prn 'super-class?
-           super (defined? hierarchy super)
-           sub (defined? hierarchy sub)
-           [(qualify-class sub) (qualify-class super)]
-           (isa? hierarchy (qualify-class sub) (qualify-class super))
-           hierarchy)
-      (prn 'super-class? (and (defined? hierarchy super)
-                              (defined? hierarchy sub)
-                              (isa? hierarchy (qualify-class super) (qualify-class sub))))
+      ;; (prn 'super-class?
+      ;;      super (defined? hierarchy super)
+      ;;      sub (defined? hierarchy sub)
+      ;;      [(qualify-class sub) (qualify-class super)]
+      ;;      (isa? hierarchy (qualify-class sub) (qualify-class super))
+      ;;      hierarchy)
+      ;; (prn 'super-class? (and (defined? hierarchy super)
+      ;;                         (defined? hierarchy sub)
+      ;;                         (isa? hierarchy (qualify-class super) (qualify-class sub))))
       (list [state (and (defined? hierarchy super)
                         (defined? hierarchy sub)
                         (isa? hierarchy (qualify-class sub) (qualify-class super)))]))))
 
 ;; Monads / Solving
 (defn upcast [target-type type]
-  (prn 'upcast target-type type)
+  ;; (prn 'upcast target-type type)
   (match [target-type type]
     [::$fn [::function ?arities]]
     (return state-seq-m type)
@@ -160,7 +159,7 @@
       (return state-seq-m type)
       (exec state-seq-m
         [? (super-class? ?target-class ?source-class)
-         :let [_ (prn 'upcast/? ?)]
+         ;; :let [_ (prn 'upcast/? ?)]
          _ (if ?
              (return state-seq-m nil)
              zero)]
@@ -176,6 +175,18 @@
        _ (solve expected =type)]
       (return state-seq-m true))
 
+    [[::var ?e-id] [::var ?a-id]]
+    zero
+
+    [[::var ?e-id] _]
+    (exec state-seq-m
+      [[=top =bottom] (deref-var expected)
+       _ (exec state-seq-m
+           [_ (solve =top actual)
+            _ (update-var expected actual =bottom)]
+           (return state-seq-m true))]
+      (return state-seq-m true))
+    
     [_ [::var _]]
     (exec state-seq-m
       [[=top =bottom] (deref-var actual)
@@ -209,16 +220,17 @@
     [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
     (exec state-seq-m
       [? (super-class? ?class ?lit-class)
-       :let [_ (prn "Object vs literal:" ?class ?lit-class ?)]
-       _ (fn [state]
-           (prn '? ? 'state state)
-           (list [state nil]))]
+       ;; :let [_ (prn "Object vs literal:" ?class ?lit-class ?)]
+       ;; _ (fn [state]
+       ;;     (prn '? ? 'state state)
+       ;;     (list [state nil]))
+       ]
       (if ?
         (return state-seq-m true)
         zero))
 
     [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
-    (do (prn [::object ?e-class ?e-params] [::object ?a-class ?a-params])
+    (do ;; (prn [::object ?e-class ?e-params] [::object ?a-class ?a-params])
       (if (= ?e-class ?a-class)
         (exec state-seq-m
           [_ (map-m state-seq-m
@@ -295,34 +307,59 @@
 (defn ^:private realize [bindings type]
   (match type
     [::object ?class ?params]
-    (return state-seq-m [::object ?class (map realize ?params)])
+    (exec state-seq-m
+      [=params (map-m state-seq-m (partial realize bindings) ?params)]
+      (return state-seq-m [::object ?class (vec =params)]))
     
     [::union ?types]
-    (return state-seq-m [::union (map realize ?types)])
+    (exec state-seq-m
+      [=types (map-m state-seq-m (partial realize bindings) ?types)]
+      (return state-seq-m [::union (vec =types)]))
 
     [::complement ?type]
-    (return state-seq-m [::complement (realize ?type)])
+    (exec state-seq-m
+      [=type (realize bindings ?type)]
+      (return state-seq-m [::complement =type]))
+
+    [::function ?arities]
+    (exec state-seq-m
+      [=arities (map-m state-seq-m (partial realize bindings) ?arities)]
+      (return state-seq-m [::function =arities]))
+
+    [::arity ?args ?return]
+    (exec state-seq-m
+      [=args (map-m state-seq-m (partial realize bindings) ?args)
+       =return (realize bindings ?return)]
+      (return state-seq-m [::arity =args =return]))
 
     (?token :guard symbol?)
     (if-let [=var (get bindings ?token)]
-      =var
+      (return state-seq-m =var)
       zero)
     
     :else
     (return state-seq-m type)
     ))
 
-(defn fn-call [type-fn params]
+(defn apply [type-fn params]
   (match type-fn
     [::all ?params ?type-def]
-    (when (= (count ?params) (count params))
-      (exec state-seq-m
-        [=vars (map-m state-seq-m (fn [_] fresh-var) ?params)
-         :let [pairs (map vector =vars params)]
-         _ (map-m state-seq-m (fn [[=var =input]] (solve =var =input)) pairs)]
-        (realize (into {} pairs) ?type-def)))
+    (if (= (count ?params) (count params))
+      (realize (into {} (map vector ?params params))
+               ?type-def)
+      zero)
     :else
     zero))
+
+(defn instantiate [type]
+  (match type
+    [::all ?params ?type-def]
+    (exec state-seq-m
+      [=params (map-m state-seq-m (constantly fresh-var) ?params)]
+      (apply type =params))
+    
+    :else
+    (return state-seq-m type)))
 
 ;; Monads / Types
 (do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]
