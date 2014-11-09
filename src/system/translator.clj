@@ -55,7 +55,14 @@
       `(~'Fn ~@(map type->code ?arities)))
     
     [::&type/all ?env ?vars ?poly]
-    `(~'All ~(vec ?vars) ~(type->code ?poly))
+    (let [vars* (mapv #(match %
+                         (?name :guard symbol?)
+                         ?name
+
+                         [(?name :guard symbol?) :< ?top]
+                         [?name :< (type->code ?top)])
+                      ?vars)]
+      `(~'All ~vars* ~(type->code ?poly)))
     
     (?type-var :guard symbol?)
     ?type-var

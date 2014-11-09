@@ -73,6 +73,7 @@
     (return state-seq-m =type)))
 
 (defn ^:private extract-vars [type]
+  (prn 'extract-vars type)
   (match type
     [::&type/bound _]
     (exec state-seq-m
@@ -101,7 +102,8 @@
     [::&type/bound _]
     (exec state-seq-m
       [=type (&util/with-field* :types
-               (&type/deref-binding type))]
+               (&type/deref-binding type))
+       :let [_ (prn 'prettify-type type '=type =type)]]
       (prettify-type mappings =type))
     
     [::&type/var _]
@@ -109,7 +111,8 @@
       (return state-seq-m var-name)
       (exec state-seq-m
         [[=top =bottom] (&util/with-field* :types
-                          (&type/deref-var type))]
+                          (&type/deref-var type))
+         :let [_ (prn 'prettify-type type '=type =top =bottom)]]
         (prettify-type mappings =top)))
 
     [::&type/object ?class ?params]
@@ -186,6 +189,12 @@
                     (if (= 1 idx)
                       (symbol (str alphabet))
                       (symbol (str alphabet idx))))]
+  (defn ^:private fresh-poly-fn [num-args]
+    (let [names (take (inc num-args) +var-names+)]
+      (return state-seq-m [::&type/all {} (vec names)
+                           [::&type/function (list [::&type/arity (vec (take num-args names))
+                                                    (last names)])]])))
+  
   (defn ^:private generalize-arity [arity]
     ;; (prn 'generalize-arity arity)
     (match arity
@@ -194,10 +203,14 @@
         [body-vars* (extract-vars ?body)
          args-vars* (map-m state-seq-m extract-vars ?args)
          :let [body-vars (set body-vars*)
+               _ (prn 'body-vars body-vars)
                args-vars (set (apply concat args-vars*))
+               _ (prn 'args-vars args-vars)
                poly-vars (set/intersection args-vars body-vars)
+               _ (prn 'poly-vars poly-vars)
                used-vars (take (count poly-vars) +var-names+)
                mappings (into {} (map vector (seq poly-vars) used-vars))
+               _ (prn 'mappings mappings)
                rev-mappings (set/map-invert mappings)
                ;; _ (prn 'generalize-arity/vars body-vars args-vars poly-vars mappings)
                ]
@@ -256,13 +269,13 @@
     
     [::&type/object 'java.lang.Boolean []]
     (do ;; (println "Reached:" [::&type/object 'java.lang.Boolean []])
-      (exec state-seq-m
-        [=type (return-all (list [::&type/literal java.lang.Boolean true]
-                                 [::&type/literal java.lang.Boolean false]))
-         ;; :let [_ (prn 'refine-local/=type =type)]
-         _ (&util/with-field* :types
-             (&type/update-binding local =type))]
-        (return state-seq-m =type)))
+        (exec state-seq-m
+          [=type (return-all (list [::&type/literal java.lang.Boolean true]
+                                   [::&type/literal java.lang.Boolean false]))
+           ;; :let [_ (prn 'refine-local/=type =type)]
+           _ (&util/with-field* :types
+               (&type/update-binding local =type))]
+          (return state-seq-m =type)))
     
     :else
     (return state-seq-m type)
@@ -858,8 +871,35 @@
       (do ;; (prn [::&parser/fn-call ?fn ?args])
           (exec state-seq-m
             [=fn (check* ?fn)
-             ;; :let [_ (prn '=fn =fn)]
+             :let [_ (prn '=fn =fn)]
              =args (map-m state-seq-m check* ?args)
+             =fn (match =fn
+                   [::&type/bound _]
+                   (&util/with-field* :types
+                     (exec state-seq-m
+                       [=fn* (&type/deref-binding =fn)]
+                       (match =fn*
+                         [::&type/var _]
+                         (exec state-seq-m
+                           [;; [=top =bottom] (&type/deref-var =fn*)
+                            ;; =var &type/fresh-var
+                            ;; :let [_ (prn 'NEW-FN-VAR =var)]
+                            ;; =bound (&type/bind =var)
+                            ;; :let [_ (prn 'NEW-FN-BOUND =bound)]
+                            ;; =args* (map-m state-seq-m &type/deref-binding =args)
+                            =fn-type (fresh-poly-fn (count =args))
+                            =fn-type (&type/instantiate =fn-type)
+                            ;; :let [=fn-type [::&type/function (list [::&type/arity (vec =args*) =bound])]
+                            ;;       _ (prn 'NEW-FN-TYPE =fn-type)]
+                            _ (&type/solve =fn-type =fn*)]
+                           (return state-seq-m =fn-type))
+                         
+                         :else
+                         (return state-seq-m =fn))))
+
+                   :else
+                   (return state-seq-m =fn))
+             :let [_ (prn 'NEW '=fn =fn)]
              =return (fn-call =fn =args)
              ;; :let [_ (prn '=return =return)]
              ]

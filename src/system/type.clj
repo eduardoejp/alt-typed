@@ -270,8 +270,16 @@
       (return state-seq-m true))
 
     [[::var ?e-id] [::var ?a-id]]
-    zero
-
+    (if (= ?e-id ?a-id)
+      (return state-seq-m true)
+      (exec state-seq-m
+        [[=top-e =bottom-e] (deref-var expected)
+         [=top-a =bottom-a] (deref-var actual)
+         _ (solve =top-e =top-a)
+         _ (solve =bottom-a =bottom-e)
+         _ (update-var expected =top-a =bottom-a)]
+        (return state-seq-m true)))
+    
     [[::var ?e-id] _]
     (exec state-seq-m
       [[=top =bottom] (deref-var expected)

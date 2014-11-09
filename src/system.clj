@@ -354,27 +354,31 @@
             (java.lang.Long)
             (new java.lang.Long "YOLO")
 
-            ((All [[a :< [:system.type/object java.lang.Map (Any Any)]]] [a -> a]))
+            ((All [[a :< (java.lang.Map Any Any)]] [a -> a]))
             (do (ann-class (java.lang.Map key val) [java.lang.Object])
               (ann map? (Fn [(java.lang.Map Any Any) -> true]
                             [(Not (java.lang.Map Any Any)) -> false]))
               (fn foo [x]
                 (assert (map? x) "YOLO")
                 x))
+
+            ([[Any -> Any] Any -> Any])
+            (fn _ [f x]
+              (f x))
             )))
   
   ;; MISSING: Bounded polymorphism
   ;; MISSING: Destructuring
-  ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
-  ;; MISSING: var-args
-  ;; MISSING: macro-expansion.
-  ;; MISSING: Scope handling (public vs private)
-
+  ;; MISSING: Recursive types
   ;; MISSING: def(protocol|type|record), proxy & reify
   ;; MISSING: multimethods
   ;; MISSING: gen-class
   ;; MISSING: covariance, contravariance & invariance.
-  ;; MISSING: Recursive types
+  ;; MISSING: var-args
+  ;; MISSING: macro-expansion.
+  ;; MISSING: Scope handling (public vs private)
+  ;; Pre-inference annotating.
+  
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
@@ -392,8 +396,17 @@
                             [Boolean -> :meme]))
           (fn foo []
             (use-case (get-object)))))
-  
 
+  [[Any -> Any] Any -> Any]
+  [(All [a b] [a -> b]) Any -> Any]
+  (run '(fn _ [f x]
+          (f x)))
+
+  ;; Right one:
+  [(All [a b] [a -> b]) a -> b]
+  (All [a b] [[a -> b] a -> b])
+
+  
   ;; Must fix issue with refining in order to get this to type-check.
   (run '(do (ann inc [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer])
           (ann < [java.lang.Number java.lang.Number -> java.lang.Boolean])
