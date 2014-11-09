@@ -17,6 +17,9 @@
   (t/Rec [$self]
          (t/Map k (t/Or Rule $self))))
 
+;; (defalias (RuleSet k)
+;;   (t/Map k (t/Or Rule (RuleSet k))))
+
 (defalias (Data k)
   (t/Map k t/Any))
 

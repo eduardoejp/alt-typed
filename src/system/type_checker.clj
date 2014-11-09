@@ -96,6 +96,7 @@
     (return state-seq-m '())))
 
 (defn ^:private prettify-type [mappings type]
+  (prn 'prettify-type mappings type)
   (match type
     [::&type/bound _]
     (exec state-seq-m
@@ -197,15 +198,26 @@
                poly-vars (set/intersection args-vars body-vars)
                used-vars (take (count poly-vars) +var-names+)
                mappings (into {} (map vector (seq poly-vars) used-vars))
+               rev-mappings (set/map-invert mappings)
                ;; _ (prn 'generalize-arity/vars body-vars args-vars poly-vars mappings)
                ]
          arity* (prettify-type mappings arity)
-         ;; :let [_ (prn '(prettify-type mappings arity) arity*)]
+         :let [_ (prn '(prettify-type mappings arity) arity*)]
          ]
-        (return state-seq-m (if (empty? used-vars)
-                              arity*
-                              [::&type/all {} (vec used-vars) arity*])))
-      )))
+        (if (empty? used-vars)
+          (return state-seq-m arity*)
+          (exec state-seq-m
+            [user-vars* (map-m state-seq-m
+                               (fn [uv]
+                                 (exec state-seq-m
+                                   [[=top =bottom] (&util/with-field* :types
+                                                     (&type/deref-var (get rev-mappings uv)))]
+                                   (return state-seq-m (if (= [::&type/any] =top)
+                                                         uv
+                                                         [uv :< =top]))))
+                               used-vars)]
+            (return state-seq-m [::&type/all {} (vec user-vars*) arity*])))
+        ))))
 
 (defn ^:private merge-arities [worlds]
   (if (empty? worlds)
@@ -613,13 +625,20 @@
        _ (&util/with-field* :types
            (&type/solve [::&type/any] =message))
        =test (check* ?test)
+       ;; =test (refine check* [&type/+truthy+] ?test)
+       ;; :let [_ (prn '=test =test)]
        _ (&util/parallel [(&util/with-field* :types
                             (&type/solve &type/+truthy+ =test))
                           (&util/with-field* :types
                             (exec state-seq-m
                               [=boolean (&type/instantiate* 'java.lang.Boolean [])]
-                              (&type/solve =boolean =test)))])]
-      (return state-seq-m [::&type/nothing]))
+                              (if (= =boolean =test)
+                                (return state-seq-m true)
+                                zero)))])
+       _ (fn [state]
+           (prn 'state state)
+           (list [state nil]))]
+      (return state-seq-m [::&type/nil]))
     
     [::&parser/def ?var ?value]
     (exec state-seq-m
@@ -729,7 +748,8 @@
                                              ?args)
                                 =return (with-env {?local-name =fn}
                                           (with-env (into {} (map vector ?args =args))
-                                            (check* ?body)))]
+                                            (check* ?body)))
+                                :let [_ (prn '=return =return)]]
                                (generalize-arity [::&type/arity =args =return])))
        ;; :let [_ (prn (map second worlds))]
        ]

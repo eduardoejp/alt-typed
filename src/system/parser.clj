@@ -97,6 +97,12 @@
     (?value :guard keyword?)
     (return state-seq-m [::&types/literal 'clojure.lang.Keyword ?value])
 
+    'Any
+    (return state-seq-m [::&types/any])
+
+    'Nothing
+    (return state-seq-m [::&types/nothing])
+
     'IO
     (return state-seq-m [::&types/io])
 

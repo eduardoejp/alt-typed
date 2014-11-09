@@ -341,7 +341,7 @@
             (fn _ [x]
               (. x (doubleValue)))
             
-            ([java.lang.Long -> java.lang.Object])
+            ([java.lang.Long -> java.lang.Long])
             (fn _ [x]
               (. x value))
 
@@ -353,13 +353,19 @@
 
             (java.lang.Long)
             (new java.lang.Long "YOLO")
+
+            ((All [[a :< [:system.type/object java.lang.Map (Any Any)]]] [a -> a]))
+            (do (ann-class (java.lang.Map key val) [java.lang.Object])
+              (ann map? (Fn [(java.lang.Map Any Any) -> true]
+                            [(Not (java.lang.Map Any Any)) -> false]))
+              (fn foo [x]
+                (assert (map? x) "YOLO")
+                x))
             )))
   
-  ;; MISSING: assert
+  ;; MISSING: Bounded polymorphism
   ;; MISSING: Destructuring
   ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
-  ;; MISSING: Clojure type tags.
-  ;; MISSING: Interact with Java reflection & Clojure type annotations.
   ;; MISSING: var-args
   ;; MISSING: macro-expansion.
   ;; MISSING: Scope handling (public vs private)
@@ -375,24 +381,45 @@
   (run '(do (ann get-object [-> java.lang.Object])
           (ann use-case (Fn [String -> :yolo]
                             [Integer -> :lol]
-                            [Boolean -> :meme]))
+                            [Boolean -> :meme]
+                            [Any -> :meme]))
           (fn foo []
             (use-case (get-object)))))
 
+  (run '(do (ann get-object [-> java.lang.Object])
+          (ann use-case (Fn [String -> :yolo]
+                            [Integer -> :lol]
+                            [Boolean -> :meme]))
+          (fn foo []
+            (use-case (get-object)))))
+  
 
   ;; Must fix issue with refining in order to get this to type-check.
   (run '(do (ann inc [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer])
-          (ann < [java.lang.Long java.lang.Long -> java.lang.Boolean])
+          (ann < [java.lang.Number java.lang.Number -> java.lang.Boolean])
           (loop [cnt 0]
             (if (< cnt 10)
               (recur (inc cnt))
               :done))))
 
-  (run '(do (ann map? (Fn [Map -> true]
-                          [(Not Map) -> false]))
+  (run '(do (ann-class (java.lang.Map key val) [java.lang.Object])
+          (ann map? (Fn [(java.lang.Map Any Any) -> true]
+                        [(Not (java.lang.Map Any Any)) -> false]))
           (fn foo [x]
             (assert (map? x) "YOLO")
-            x)))
+            x)
+          ))
+
+  (run '(do (ann-class (java.lang.Map key val) [java.lang.Object])
+          (ann map? (Fn [(java.lang.Map Any Any) -> true]
+                        [(Not (java.lang.Map Any Any)) -> false]))
+          (fn foo [x]
+            (if (map? x)
+              x
+              "YOLO"))
+          ))
+
+  
   
   ;; Refactorings to do:
   ;; ::expr instead of ::bound to signal a type that has been calculated by the type-checker.
