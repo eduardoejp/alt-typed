@@ -204,7 +204,7 @@
          ]
         (return state-seq-m (if (empty? used-vars)
                               arity*
-                              [::&type/all (vec used-vars) arity*])))
+                              [::&type/all {} (vec used-vars) arity*])))
       )))
 
 (defn ^:private merge-arities [worlds]
@@ -279,7 +279,7 @@
     (return state-seq-m =form)))
 
 (defn ^:private check-arity [=arity =args]
-  ;; (prn 'check-arity =arity =args)
+  (prn 'check-arity =arity =args)
   (match =arity
     [::&type/arity ?args ?return]
     (exec state-seq-m
@@ -297,8 +297,11 @@
   (exec state-seq-m
     [=fn (&util/with-field* :types
            (exec state-seq-m
-             [=fn (&type/instantiate =fn)]
-             (&type/upcast ::&type/$fn =fn)))
+             [=fn (&type/instantiate =fn)
+              :let [_ (prn '(&type/type-fn? =fn) (&type/type-fn? =fn) =fn)]]
+             (if (&type/type-fn? =fn)
+               (fn-call =fn =args)
+               (&type/upcast ::&type/$fn =fn))))
      :let [_ (prn 'fn-call '=fn =fn '=args =args)]
      ]
     (match =fn
@@ -325,8 +328,8 @@
          (&type/define-class (qualify ns (:class class)) (map :class parents)))]
     (return state-seq-m [::&type/nil])))
 
-(defn ^:private check* [form]
-  (prn 'check* form)
+(defn check* [form]
+  ;; (prn 'check* form)
   (match form
     [::&parser/#nil]
     (return state-seq-m [::&type/nil])
@@ -403,35 +406,44 @@
         (return state-seq-m [::&type/object 'clojure.lang.IPersistentSet [=elems]])))
     
     [::&parser/symbol ?symbol]
-    (exec state-seq-m
-      [=symbol (&util/with-field :env
-                 (&env/resolve ?symbol))]
-      (if (not= [::&type/macro] =symbol)
-        (return state-seq-m =symbol)
-        zero))
+    (do (prn [::&parser/symbol ?symbol])
+      (if-let [ns (namespace ?symbol)]
+        (exec state-seq-m
+          [[class =field] (&util/with-field* :types
+                            (&type/member-candidates [(-> ?symbol name symbol) :static-fields]))
+           :let [_ (prn '[class =field] [class =field])]]
+          (if (= class (symbol ns))
+            (return state-seq-m =field)
+            zero))
+        (exec state-seq-m
+          [=symbol (&util/with-field :env
+                     (&env/resolve ?symbol))]
+          (if (not= [::&type/macro] =symbol)
+            (return state-seq-m =symbol)
+            zero))))
     
     [::&parser/do & ?forms]
-    (do (prn [::&parser/do ?forms])
-      (case (count ?forms)
-        0 (return state-seq-m [::&type/nil])
-        1 (exec state-seq-m
-            [?form (&parser/parse (first ?forms))]
-            (check* ?form))
-        ;; else
-        (exec state-seq-m
-          [=forms (map-m state-seq-m
-                         (fn [?form]
-                           (exec state-seq-m
-                             [?form (&parser/parse ?form)]
-                             (check* ?form)))
-                         ?forms)
-           =body (&type/sequentially-combine-types =forms)]
-          (return state-seq-m =body))))
+    (do ;; (prn [::&parser/do ?forms])
+        (case (count ?forms)
+          0 (return state-seq-m [::&type/nil])
+          1 (exec state-seq-m
+              [?form (&parser/parse (first ?forms))]
+              (check* ?form))
+          ;; else
+          (exec state-seq-m
+            [=forms (map-m state-seq-m
+                           (fn [?form]
+                             (exec state-seq-m
+                               [?form (&parser/parse ?form)]
+                               (check* ?form)))
+                           ?forms)
+             =body (&type/sequentially-combine-types =forms)]
+            (return state-seq-m =body))))
 
     [::&parser/let ([[?label ?value] & ?bindings] :seq) ?body]
     (exec state-seq-m
       [=value (check* ?value)
-       :let [_ (prn ::&parser/let '?label ?label)]
+       ;; :let [_ (prn ::&parser/let '?label ?label)]
        [?label =value] (match ?label
                          [::&parser/symbol ?local]
                          (exec state-seq-m
@@ -738,16 +750,34 @@
            ]
           (return state-seq-m [::&type/nil])))
 
-    [::&parser/ann-class ?class ?parents]
-    (do (prn [::&parser/ann-class ?class ?parents])
+    [::&parser/ann-class ?class ?parents ?fields+methods]
+    (do ;; (prn [::&parser/ann-class ?class ?parents])
         (exec state-seq-m
-          [_ (&util/with-field* :types
-               (&type/define-class ?class ?parents))
-           state &util/get-state
-           :let [_ (prn (:types state))]]
+          [=class (&util/with-field* :types
+                    (&type/define-class ?class ?parents))
+           all-categories+members (map-m state-seq-m
+                                         (fn [[category members]]
+                                           (if (= :ctor category)
+                                             (exec state-seq-m
+                                               [=ctor (&parser/parse-type-def members)]
+                                               (return state-seq-m [:ctor =ctor]))
+                                             (exec state-seq-m
+                                               [all-members+types (map-m state-seq-m
+                                                                         (fn [[name type]]
+                                                                           (exec state-seq-m
+                                                                             [=type (&parser/parse-type-def type)]
+                                                                             (return state-seq-m [name =type])))
+                                                                         members)]
+                                               (return state-seq-m [category (into {} all-members+types)]))))
+                                         (apply hash-map ?fields+methods))
+           _ (&util/with-field* :types
+               (&type/define-class-members (nth ?class 0) (into {} all-categories+members)))
+           ;; state &util/get-state
+           ;; :let [_ (prn ::&parser/ann-class (:types state))]
+           ]
           (do ;; (println "DONE ANNOTATING")
               (return state-seq-m [::&type/nil]))))
-
+    
     [::&parser/defalias ?name ?params ?type-def]
     (let [=type (if (empty? ?params)
                   [::&type/alias ?name ?type-def]
@@ -757,16 +787,63 @@
              (&type/define-type ?name =type))]
         (return state-seq-m [::&type/nil])))
 
+    [::&parser/field-access ?field ?obj]
+    (exec state-seq-m
+      [=obj (check* ?obj)
+       [class =field] (&util/with-field* :types
+                        (&type/member-candidates [?field :fields]))]
+      (fn-call =field (list =obj)))
+    
+    [::&parser/method-call ?method ?obj ?args]
+    (exec state-seq-m
+      [:let [_ (prn [::&parser/method-call ?method ?obj ?args])]
+       =obj (check* ?obj)
+       =args (map-m state-seq-m check* ?args)
+       :let [_ (prn '=obj =obj '=args =args)]
+       [class =method] (&util/with-field* :types
+                         (&type/member-candidates [?method :methods]))
+       :let [_ (prn '[class =method] [class =method])]
+       _ (&util/with-field* :types
+           (exec state-seq-m
+             [=object (&type/instantiate* class [])
+              :let [_ (prn '=object =object)]]
+             (&type/solve =object =obj)))
+       :let [_ (println "SOLVED")]
+       =method (fn-call =method (list =obj))]
+      (fn-call =method =args))
+
+    [::&parser/new ?class ?args]
+    (exec state-seq-m
+      [=args (map-m state-seq-m check* ?args)
+       [_ =ctor] (&util/with-field* :types
+                   (&type/member-candidates [?class :ctor]))]
+      (fn-call =ctor =args))
+
     [::&parser/fn-call ?fn ?args]
-    (do ;; (prn [::&parser/fn-call ?fn ?args])
-        (exec state-seq-m
-          [=fn (check* ?fn)
-           :let [_ (prn '=fn =fn)]
-           =args (map-m state-seq-m check* ?args)
-           =return (fn-call =fn =args)
-           ;; :let [_ (prn '=return =return)]
-           ]
-          (return state-seq-m =return)))
+    (if-let [[?class ?method] (match ?fn
+                                [::&parser/symbol ?symbol]
+                                (if-let [ns (namespace ?symbol)]
+                                  [(symbol ns) (symbol (name ?symbol))])
+
+                                :else
+                                nil)]
+      (exec state-seq-m
+        [=args (map-m state-seq-m check* ?args)
+         [class =method] (&util/with-field* :types
+                           (&type/member-candidates [?method :static-methods]))
+         =method (if (= class ?class)
+                   (return state-seq-m =method)
+                   zero)]
+        (fn-call =method =args))
+      (do ;; (prn [::&parser/fn-call ?fn ?args])
+          (exec state-seq-m
+            [=fn (check* ?fn)
+             ;; :let [_ (prn '=fn =fn)]
+             =args (map-m state-seq-m check* ?args)
+             =return (fn-call =fn =args)
+             ;; :let [_ (prn '=return =return)]
+             ]
+            (return state-seq-m =return))))
     ))
 
 ;; [Interface]

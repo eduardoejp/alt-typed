@@ -7,5 +7,8 @@
 ;; [Interface]
 (def install
   (exec state-seq-m
-    [_ &java-lang/install]
+    [_ &java-lang/install
+     state &util/get-state
+     ;; :let [_ (prn 'install/state (:types state))]
+     ]
     (return state-seq-m nil)))

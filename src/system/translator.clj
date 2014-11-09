@@ -54,7 +54,7 @@
       (type->code (first ?arities))
       `(~'Fn ~@(map type->code ?arities)))
     
-    [::&type/all ?vars ?poly]
+    [::&type/all ?env ?vars ?poly]
     `(~'All ~(vec ?vars) ~(type->code ?poly))
     
     (?type-var :guard symbol?)

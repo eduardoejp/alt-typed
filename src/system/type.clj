@@ -12,7 +12,7 @@
 ;; [Data]
 (defrecord TypeVars [counter mappings])
 (defrecord BoundTypes [counter mappings])
-(defrecord Types [db vars bound class-hierarchy casts])
+(defrecord Types [db vars bound class-hierarchy casts members])
 
 ;; [Utils]
 (defn ^:private defined? [hierarchy class]
@@ -25,7 +25,7 @@
 (def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
 (def +truthy+ [::complement +falsey+])
 
-(def +init+ (Types. {} (TypeVars. 0 {}) (BoundTypes. 0 {}) (make-hierarchy) {}))
+(def +init+ (Types. {} (TypeVars. 0 {}) (BoundTypes. 0 {}) (make-hierarchy) {} {}))
 
 ;; Monads / vars
 (def fresh-var
@@ -99,9 +99,10 @@
                      [_ (resolve class)]
                      zero)
                    (exec state-seq-m
-                     [_ (if (empty? params)
-                          (define-type class [::object class []])
-                          (define-type class [::all params [::object class params]]))]
+                     [:let [=instance (if (empty? params)
+                                        [::object class []]
+                                        [::all {} params [::object class params]])]
+                      _ (define-type class =instance)]
                      (fn [^Types state]
                        ;; (prn '(defined? (.-class-hierarchy state) (nth class 0)) (defined? (.-class-hierarchy state) (nth class 0)))
                        (let [class-name (qualify-class class)]
@@ -116,11 +117,50 @@
                              (list [(-> state
                                         (assoc :class-hierarchy hierarchy*)
                                         (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
-                                                                                 [p-class [::all params [::object p-class p-params]]])
+                                                                                 [p-class [::all {} params [::object p-class p-params]]])
                                                                                parents))))
                                     nil]))
                            '()))
                        ))]))
+
+(defn define-class-members [class all-members]
+  ;; members {decode {:static-methods {java.lang.Long [java.lang.String -> java.lang.Long]}}}
+  (exec state-seq-m
+    [=class (resolve class)
+     :let [wrap (match =class
+                  [::object _ _]
+                  (fn [=type]
+                    [::function (list [::arity [=class] =type])])
+                  
+                  [::all ?env ?params ?instance-type]
+                  (fn [=type]
+                    [::all ?env ?params
+                     [::function (list [::arity [?instance-type] =type])]])
+                  )]]
+    (fn [^Types state]
+      (list [(update-in state [:members]
+                        (fn [members]
+                          (reduce (fn [members [category entries]]
+                                    (if (= :ctor category)
+                                      (assoc-in members [[class category] class] entries)
+                                      (reduce (fn [members [name =type]]
+                                                (assoc-in members [[name category] class] (if (or (= :static-fields category)
+                                                                                                  (= :static-methods category))
+                                                                                            =type
+                                                                                            (wrap =type))))
+                                              members entries)))
+                                  members all-members)))
+             nil])
+      )))
+
+(defn member-candidates [[name category]]
+  (fn [^Types state]
+    (prn 'member-candidates [name category] (.-members state))
+    (for [[[name* category*] classes] (.-members state)
+          :when (and (= name name*)
+                     (= category category*))
+          class+type classes]
+      [state class+type])))
 
 (defn ^:private super-class? [super sub]
   (fn [^Types state]
@@ -166,7 +206,7 @@
 
 ;; Monads / Solving
 (defn upcast [target-type type]
-  (prn 'upcast target-type type)
+  ;; (prn 'upcast target-type type)
   (match [target-type type]
     [::$fn [::function ?arities]]
     (return state-seq-m type)
@@ -199,18 +239,19 @@
          :let [;; matches (map vector
                ;;              (cons ?source-class family-line)
                ;;              family-line)
-               _ (prn 'family-line family-line)
+               ;; _ (prn 'family-line family-line)
                ;; _ (prn 'matches matches)
                ]
          ^Types types &util/get-state
          :let [casts (.-casts types)
-               _ (prn 'casts casts)]]
+               ;; _ (prn 'casts casts)
+               ]]
         (reduce-m state-seq-m
                   (fn [current next-class]
                     (match current
                       [::object ?current-class ?params]
-                      (let [_ (prn `(~'get-in ~'casts [~?current-class ~next-class]) (get-in casts [?current-class next-class]))
-                            _ (prn `(~'get-in ~'casts [~?current-class]) (get-in casts [?current-class]))
+                      (let [;; _ (prn `(~'get-in ~'casts [~?current-class ~next-class]) (get-in casts [?current-class next-class]))
+                            ;; _ (prn `(~'get-in ~'casts [~?current-class]) (get-in casts [?current-class]))
                             =type-fn (get-in casts [?current-class next-class])]
                         (apply =type-fn ?params))))
                   type
@@ -389,17 +430,20 @@
     (if-let [=var (get bindings ?token)]
       (return state-seq-m =var)
       zero)
+
+    [::all ?env ?params ?type-def]
+    (return state-seq-m [::all (merge bindings ?env) ?params ?type-def])
     
     :else
     (return state-seq-m type)
     ))
 
 (defn apply [type-fn params]
-  (prn 'apply type-fn params)
+  ;; (prn 'apply type-fn params)
   (match type-fn
-    [::all ?params ?type-def]
+    [::all ?env ?params ?type-def]
     (if (= (count ?params) (count params))
-      (realize (into {} (map vector ?params params))
+      (realize (into ?env (map vector ?params params))
                ?type-def)
       zero)
     
@@ -408,7 +452,7 @@
 
 (defn instantiate [type]
   (match type
-    [::all ?params ?type-def]
+    [::all _ ?params _]
     (exec state-seq-m
       [=params (map-m state-seq-m (constantly fresh-var) ?params)]
       (apply type =params))
@@ -416,19 +460,20 @@
     :else
     (return state-seq-m type)))
 
-(defn ^:private type-fn? [type]
+(defn type-fn? [type]
   (match type
-    [::all _ _]
+    [::all _ _ _]
     true
     
     :else
     false))
 
 (defn instantiate* [name params]
-  (prn 'instantiate* name params)
+  ;; (prn 'instantiate* name params)
   (exec state-seq-m
     [=type-fn (resolve name)
-     :let [_ (prn '=type-fn)]]
+     ;; :let [_ (prn '=type-fn)]
+     ]
     (if (type-fn? =type-fn)
       (apply =type-fn params)
       (return state-seq-m =type-fn))))
@@ -547,12 +592,3 @@
 
       [?init & ?others]
       (reduce-m state-seq-m adder ?init ?others))))
-
-;; (Or String Number) Long = (Or String Number)
-;; (And String Number) Long = (And String Long)
-
-;; (Or String Number) Any = Any
-;; (And String Number) Any = (And String Long)
-
-;; (Or String Number) Nothing = (Or String Number)
-;; (And String Number) Nothing = Nothing

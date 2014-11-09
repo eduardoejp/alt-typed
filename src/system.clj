@@ -14,10 +14,12 @@
 
 (comment
   (time (do (defonce _init_
-              (do (alter-var-root #'clojure.core/prn
-                                  (constantly #(.println System/out (apply pr-str %&))))))
+              (do ;; (alter-var-root #'clojure.core/prn
+                  ;;                 (constantly #(.println System/out (apply pr-str %&))))
+                  ))
           
-          (let [[[context _]] (&prelude/install &type-checker/+init+)]
+          (let [[[context _] :as worlds] (&prelude/install &type-checker/+init+)]
+            ;; (prn 'worlds (count worlds))
             ;; (prn 'context context)
             (defn run [code]
               (println "Code:" (pr-str code))
@@ -331,17 +333,31 @@
               (ann-class (java.lang.KV key val) [java.lang.Object])
               (ann-class (java.lang.Map key val) [(java.lang.Collection (java.lang.KV key val))])
               (ann get-map [-> (java.lang.Map String Integer)])
-              (ann ->coll (All [key val]
+              (ann ->coll (All [key val elem]
                                [(java.lang.Map key val) -> (java.lang.Collection (java.lang.KV key val))]))
               (->coll (get-map)))
-            )))
 
+            ([java.lang.Long -> java.lang.Double])
+            (fn _ [x]
+              (. x (doubleValue)))
+            
+            ([java.lang.Long -> java.lang.Object])
+            (fn _ [x]
+              (. x value))
+
+            (java.lang.Long)
+            (java.lang.Long/decode "YOLO")
+
+            (java.lang.Long)
+            java.lang.Long/MAX_VALUE
+
+            (java.lang.Long)
+            (new java.lang.Long "YOLO")
+            )))
+  
   ;; MISSING: assert
   ;; MISSING: Destructuring
-  ;; MISSING: Methods & fields for classes
-  ;; MISSING: Java interop
   ;; MISSING: Automatically generate Fn types when calling a type-var in fn-call.
-  ;; MISSING: Automatically generate Class types when doing unannotated host interop.
   ;; MISSING: Clojure type tags.
   ;; MISSING: Interact with Java reflection & Clojure type annotations.
   ;; MISSING: var-args
@@ -377,9 +393,7 @@
           (fn foo [x]
             (assert (map? x) "YOLO")
             x)))
-
   
-
   ;; Refactorings to do:
   ;; ::expr instead of ::bound to signal a type that has been calculated by the type-checker.
   ;; Eliminate ::bound & ::var.
@@ -448,4 +462,23 @@
   ;; ($math 10 < x < (20 ** 5))
 
   ;; (-> [Integer Integer] Integer) vs (-> Integer Integer Integer)
+
+  ;; (defmacro (defmacro* [name symbol] [args n-tuple] [body expr])
+  ;;   `(defmacro ((~ name) (~@ (map (\ a (->tuple (list a expr))) args)))
+  ;;      ~body))
+
+  ;; (defmacro* defn [name args body]
+  ;;   `(def ((~ name) (~@ args))
+  ;;      (~ body)))
+
+  ;; (defn+ (plus [x Int] [y Int] Int)
+  ;;   (+ x y))
+
+  ;; (: plus (All [a] (-> a a a)))
+  ;; (def (plus x y)
+  ;;   (+ x y))
+
+  ;; (defn+ ((plus a) [x a] [y a] a)
+  ;;   (+ x y))
+
   )
