@@ -19,8 +19,6 @@
                   ))
           
           (let [[[context _] :as worlds] (&prelude/install &type-checker/+init+)]
-            ;; (prn 'worlds (count worlds))
-            ;; (prn 'context context)
             (defn run [code]
               (println "Code:" (pr-str code))
               (let [monad (exec state-seq-m
@@ -89,7 +87,7 @@
               #'foo)
 
             ((Or nil java.lang.Long))
-            (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
+            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
               (parse-int "1234"))
 
             (nil)
@@ -101,7 +99,7 @@
               yolo)
 
             ((Or "YOLO" java.lang.Long))
-            (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
+            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
               (let [result (parse-int "1234")]
                 (if result
                   result
@@ -110,25 +108,25 @@
             ((All [a] [a -> a]))
             (fn id [x] x)
 
-            ((Tuple))
+            ('[])
             []
 
-            ({})
+            ('{})
             {}
 
             ((clojure.lang.IPersistentSet Nothing))
             #{}
 
-            ((Tuple :klk "YOLO"))
+            ('[:klk "YOLO"])
             [:klk "YOLO"]
             
             ([java.lang.String -> (Or nil java.lang.Long)])
-            (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
+            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
               (fn foo [x]
                 (parse-int x)))
 
             ([java.lang.String -> (Or "YOLO" java.lang.Long)])
-            (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
+            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
               (fn foo [x]
                 (let [result (parse-int x)]
                   (if result
@@ -165,8 +163,7 @@
                   x)))
 
             (java.lang.Object)
-            (do ;; (ann-class java.lang.String [java.lang.Object])
-                (ann foo [java.lang.Object -> java.lang.Object])
+            (do (ann foo (Fn [java.lang.Object -> java.lang.Object]))
               (foo "bar"))
 
             ((Fn [1 -> "YOLO"]
@@ -217,17 +214,17 @@
             (monitor-exit nil)
 
             ((Eff Nothing {:try java.lang.Exception}))
-            (do (ann ex [-> java.lang.Exception])
+            (do (ann ex (Fn [-> java.lang.Exception]))
               (throw (ex)))
 
             ((Eff 1 {:try java.lang.Exception}))
-            (do (ann ex [-> java.lang.Exception])
+            (do (ann ex (Fn [-> java.lang.Exception]))
               (throw (ex))
               1)
 
             ((Eff :else {:try java.lang.Exception}))
             (do (ann test (Or true false))
-              (ann ex [-> java.lang.Exception])
+              (ann ex (Fn [-> java.lang.Exception]))
               (let [test* test]
                 (if test*
                   (throw (ex))
@@ -235,7 +232,7 @@
 
             ((Eff :else {:try java.lang.Exception}))
             (do (ann test (Or true false))
-              (ann ex [-> java.lang.Exception])
+              (ann ex (Fn [-> java.lang.Exception]))
               (let [test* test]
                 (try (if test*
                        (throw (ex))
@@ -243,7 +240,7 @@
 
             ((Or :catch :else))
             (do (ann test (Or true false))
-              (ann ex [-> java.lang.Exception])
+              (ann ex (Fn [-> java.lang.Exception]))
               (let [test* test]
                 (try (if test*
                        (throw (ex))
@@ -254,7 +251,7 @@
 
             ((Eff (Or :catch :else) {:try java.lang.Exception}))
             (do (ann test (Or true false))
-              (ann ex [-> java.lang.Exception])
+              (ann ex (Fn [-> java.lang.Exception]))
               (let [test* test]
                 (try (if test*
                        (throw (ex))
@@ -264,12 +261,12 @@
                   (finally :finally))))
 
             ((Eff String {:io IO}))
-            (do (ann read-line [-> (Eff String {:io IO})])
+            (do (ann read-line (Fn [-> (Eff String {:io IO})]))
               (read-line))
 
             ((Eff Nothing {:io IO, :try java.lang.Exception}))
-            (do (ann ex [-> java.lang.Exception])
-              (ann read-line [-> (Eff String {:io IO})])
+            (do (ann ex (Fn [-> java.lang.Exception]))
+              (ann read-line (Fn [-> (Eff String {:io IO})]))
               (read-line)
               (throw (ex)))
 
@@ -317,11 +314,11 @@
               (ann coll->str [java.lang.Collection -> java.lang.String])
               (coll->str (get-map)))
 
-            ({:a 10 :b "YOLO"})
+            ('{:a 10 :b "YOLO"})
             {:a 10 :b "YOLO"}
 
             ("YOLO")
-            (do (ann identity (All [x] [x -> x]))
+            (do (ann identity (All [x] (Fn [x -> x])))
               (identity "YOLO"))
 
             (java.lang.String)
@@ -384,7 +381,6 @@
   ;; MISSING: Scope handling (public vs private)
   ;; MISSING: Pre-inference annotating.
   
-  
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
   (run '(do (ann get-object [-> java.lang.Object])
@@ -408,7 +404,6 @@
           (f x)))
 
   ;; Right one:
-  [(All [a b] [a -> b]) a -> b]
   (All [a b] [[a -> b] a -> b])
 
 
@@ -452,7 +447,6 @@
   ;; Refactorings to do:
   ;; ::expr instead of ::bound to signal a type that has been calculated by the type-checker.
   ;; Eliminate ::bound & ::var.
-  ;; Have an ::interval type with local top and bottom as a substitute for type-vars.
   ;; Improve type updating mechanism in recur and allow recur to work with fn.
   ;; Fix issue with refining.
   

@@ -20,10 +20,10 @@
                                    (ann-class java.lang.Short [java.lang.Number])
                                    (ann-class java.lang.Integer [java.lang.Number])
                                    (ann-class java.lang.Long [java.lang.Number]
-                                              :ctor [java.lang.String -> java.lang.Long]
-                                              :static-methods {decode [java.lang.String -> java.lang.Long]}
+                                              :ctor (Fn [java.lang.String -> java.lang.Long])
+                                              :static-methods {decode (Fn [java.lang.String -> java.lang.Long])}
                                               :static-fields {MAX_VALUE java.lang.Long}
-                                              :methods {doubleValue [-> java.lang.Double]}
+                                              :methods {doubleValue (Fn [-> java.lang.Double])}
                                               :fields {value java.lang.Long})
                                    (ann-class java.lang.Double [java.lang.Number])
                                    (ann-class java.lang.Exception [java.lang.Object])

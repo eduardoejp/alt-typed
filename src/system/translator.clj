@@ -4,7 +4,6 @@
 
 ;; Functions
 (defn type->code [type]
-  ;; (prn 'type->code type)
   (match type
     [::&type/any]
     'Any
@@ -41,10 +40,10 @@
     'Macro
 
     [::&type/tuple ?elems]
-    `(~'Tuple ~@(map type->code ?elems))
+    `'~(mapv type->code ?elems)
 
     [::&type/record ?entries]
-    (into {} (for [[k v] ?entries] [(type->code k) (type->code v)]))
+    `'~(into {} (for [[k v] ?entries] [(type->code k) (type->code v)]))
     
     [::&type/arity ?args ?return]
     `[~@(map type->code ?args) ~'-> ~(type->code ?return)]

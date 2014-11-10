@@ -30,17 +30,12 @@
     [(first ctor) (vec (rest ctor))]))
 
 (defn ^:private parse-arity [parse-type-def type-def]
-  ;; (prn 'parse-arity type-def)
   (match type-def
     [& ?parts]
     (let [[args [_ return]] (split-with (partial not= '->) ?parts)]
       (exec state-seq-m
-        [;; :let [_ (prn '[args return] [args return])]
-         *args (map-m state-seq-m parse-type-def args)
-         ;; :let [_ (prn '*args *args)]
-         *return (parse-type-def return)
-         ;; :let [_ (prn '*return *return)]
-         ]
+        [*args (map-m state-seq-m parse-type-def args)
+         *return (parse-type-def return)]
         (&util/return state-seq-m [::&types/arity *args *return])))))
 
 (defn test-effects [*effs]
@@ -62,7 +57,6 @@
     (return state-seq-m nil)))
 
 (defn parse-type-def [local-syms type-def]
-  (prn 'parse-type-def type-def)
   (match type-def
     nil
     (return state-seq-m [::&types/nil])
@@ -96,6 +90,9 @@
 
     (?value :guard keyword?)
     (return state-seq-m [::&types/literal 'clojure.lang.Keyword ?value])
+
+    (['quote (?value :guard symbol?)] :seq)
+    (return state-seq-m [::&types/literal 'clojure.lang.Symbol ?value])
 
     'Any
     (return state-seq-m [::&types/any])
@@ -133,37 +130,47 @@
       (return state-seq-m [::&types/eff *data *effs]))
     
     (?name :guard symbol?)
-    (do (prn 'parse-type-def '(?name :guard symbol?) ?name local-syms)
-      (&util/parallel [;; (case (get local-syms ?name)
-                       ;;   :var
-                       ;;   (return state-seq-m ?name)
+    (&util/parallel [;; (case (get local-syms ?name)
+                     ;;   :var
+                     ;;   (return state-seq-m ?name)
 
-                       ;;   ;; :rec
-                       ;;   ;; (return state-seq-m [::&types/rec ?name])
+                     ;;   ;; :rec
+                     ;;   ;; (return state-seq-m [::&types/rec ?name])
 
-                       ;;   nil
-                       ;;   zero)
-                       (exec state-seq-m
-                         [state (&util/with-field* :types
-                                  &util/get-state)
-                          ;; :let [_ (prn 'parse-type-def/symbol ?name (get-in state [:db ?name]) (get-in state [:db]))]
-                          ]
-                         (&util/with-field* :types
-                           (&types/resolve ?name)))
-                       (return state-seq-m ?name)]))
+                     ;;   nil
+                     ;;   zero)
+                     (exec state-seq-m
+                       [state (&util/with-field* :types
+                                &util/get-state)]
+                       (&util/with-field* :types
+                         (&types/resolve ?name)))
+                     (return state-seq-m ?name)])
     
-    [& ?parts]
-    (do ;; (prn '[& ?parts])
-        (exec state-seq-m
-          [=arity (parse-arity (partial parse-type-def local-syms) type-def)
-           ;; :let [_ (prn '=arity =arity)]
-           ]
-          (return state-seq-m [::&types/function (list =arity)])))
+    (['quote [& ?elems]] :seq)
+    (exec state-seq-m
+      [=elems (map-m state-seq-m (partial parse-type-def local-syms) ?elems)]
+      (return state-seq-m [::&types/tuple (vec =elems)]))
 
+    (['quote (?record :guard map?)] :seq)
+    (exec state-seq-m
+      [=kvs (map-m state-seq-m
+                   (fn [[k v]]
+                     (exec state-seq-m
+                       [=k (parse-type-def local-syms k)
+                        =v (parse-type-def local-syms v)]
+                       (return state-seq-m [=k =v])))
+                   (seq ?record))]
+      (return state-seq-m [::&types/record (into {} =kvs)]))
+
+    [& ?arity]
+    (exec state-seq-m
+      [=arity (parse-arity (partial parse-type-def local-syms) ?arity)]
+      (return state-seq-m [::&types/function (list =arity)]))
+    
     (['Fn & ?arities] :seq)
     (exec state-seq-m
       [=arities (map-m state-seq-m (partial parse-arity (partial parse-type-def local-syms)) ?arities)]
-      (return state-seq-m [::&types/function (vec =arities)]))
+      (return state-seq-m [::&types/function =arities]))
 
     (['All (?params :guard (every-pred vector? (partial every? symbol?))) ?def] :seq)
     (exec state-seq-m
@@ -171,26 +178,14 @@
       (return state-seq-m [::&types/all {} ?params *def]))
 
     ([?fn & ?params] :seq)
-    (do ;; (prn '[?fn & ?params] [?fn ?params])
-        (exec state-seq-m
-          [;; =type-fn (do ;; (prn '?fn ?fn)
-           ;;              (&util/with-field* :types
-           ;;                (&types/resolve ?fn)))
-           =type-fn (parse-type-def local-syms ?fn)
-           ;; :let [_ (prn '=type-fn =type-fn)]
-           =params (map-m state-seq-m (partial parse-type-def local-syms) ?params)
-           ;; :let [_ (prn '=params =params)]
-           ]
-          (&types/apply =type-fn =params)))
-    
-    ;; :else
-    ;; (do (prn 'parse-type-def/else)
-    ;;   zero)
+    (exec state-seq-m
+      [=type-fn (parse-type-def local-syms ?fn)
+       =params (map-m state-seq-m (partial parse-type-def local-syms) ?params)]
+      (&types/apply =type-fn =params))
     ))
 
 ;; Functions
 (defn parse [code]
-  (prn 'parse code)
   (match code
     nil
     (return state-seq-m [::#nil])
@@ -245,26 +240,25 @@
       (return state-seq-m [::#set (set *value)]))
 
     (['quote ?quoted] :seq)
-    (do ;; (prn '?quoted ?quoted (seq? ?quoted) (atom? ?quoted))
-        (cond (symbol? ?quoted)
-              (return state-seq-m [::#symbol ?quoted])
+    (cond (symbol? ?quoted)
+          (return state-seq-m [::#symbol ?quoted])
 
-              (atom? ?quoted)
-              (parse ?quoted)
+          (atom? ?quoted)
+          (parse ?quoted)
 
-              (seq? ?quoted)
-              (exec state-seq-m
-                [*elems (map-m state-seq-m parse (map (fn [x] `(quote ~x)) ?quoted))]
-                (return state-seq-m [::#list *elems]))
-              
-              (vector? ?quoted)
-              (parse (mapv (fn [x] `(quote ~x)) ?quoted))
+          (seq? ?quoted)
+          (exec state-seq-m
+            [*elems (map-m state-seq-m parse (map (fn [x] `(quote ~x)) ?quoted))]
+            (return state-seq-m [::#list *elems]))
+          
+          (vector? ?quoted)
+          (parse (mapv (fn [x] `(quote ~x)) ?quoted))
 
-              (map? ?quoted)
-              (parse (into {} (map (fn [[k v]] [`(quote ~k) `(quote ~v)]) ?quoted)))
+          (map? ?quoted)
+          (parse (into {} (map (fn [[k v]] [`(quote ~k) `(quote ~v)]) ?quoted)))
 
-              (set? ?quoted)
-              (parse (seq (map (fn [x] `(quote ~x)) ?quoted)))))
+          (set? ?quoted)
+          (parse (seq (map (fn [x] `(quote ~x)) ?quoted))))
     
     (['do & ?forms] :seq)
     (return state-seq-m `[::do ~@?forms])
@@ -294,9 +288,7 @@
       [*value (parse ?value)
        :let [[?clauses ?default] [(partition 2 ?clauses) (if (even? (count ?clauses))
                                                            nil
-                                                           (last ?clauses))]
-             ;; _ (prn '[?clauses ?default] [?clauses ?default])
-             ]
+                                                           (last ?clauses))]]
        *clauses (map-m state-seq-m
                        (fn [[?value ?form]]
                          (exec state-seq-m
@@ -402,9 +394,7 @@
     (['. ?obj ([(?method :guard symbol?) & ?args] :seq)] :seq)
     (exec state-seq-m
       [*obj (parse ?obj)
-       :let [_ (prn '. ?method '*obj *obj)]
-       *args (map-m state-seq-m parse ?args)
-       :let [_ (prn '. ?method '*args *args)]]
+       *args (map-m state-seq-m parse ?args)]
       (return state-seq-m [::method-call ?method *obj *args]))
 
     (['. ?obj (?field :guard symbol?)] :seq)
@@ -418,44 +408,30 @@
       (return state-seq-m [::new ?class (vec *args)]))
     
     (['ann (?var :guard symbol?) ?type-def] :seq)
-    (do ;; (prn `[~'ann ~?var ~?type-def])
-        (exec state-seq-m
-          [*type-def (parse-type-def {} ?type-def)
-           ;; :let [_ (prn '*type-def *type-def)]
-           ]
-          (return state-seq-m [::ann ?var *type-def])))
+    (exec state-seq-m
+      [*type-def (parse-type-def {} ?type-def)]
+      (return state-seq-m [::ann ?var *type-def]))
 
     (['ann-class (?class :guard type-ctor?)
       (?parents :guard (every-pred vector? (partial every? type-ctor?)))
       & ?fields+methods] :seq)
     (exec state-seq-m
-      [:let [[_ params :as *type-ctor] (parse-type-ctor ?class)
-             ;; _ (prn '*type-ctor *type-ctor)
-             ;; _ (prn '*parents *parents)
-             ]
+      [:let [[_ params :as *type-ctor] (parse-type-ctor ?class)]
        *parents (map-m state-seq-m (partial parse-type-def (into {} (for [p params] [p :var]))) ?parents)]
       (return state-seq-m [::ann-class *type-ctor (vec *parents) ?fields+methods]))
 
     (['defalias (?ctor :guard type-ctor?) ?type-def] :seq)
-    (let [_ (prn 'defalias/?ctor ?ctor)
-          [name args] (if (symbol? ?ctor)
+    (let [[name args] (if (symbol? ?ctor)
                         [?ctor []]
                         [(first ?ctor) (vec (rest ?ctor))])]
       (exec state-seq-m
         [*type-def (if (empty? args)
                      (parse-type-def {name :rec} ?type-def)
                      (parse-type-def (into {name :rec} (for [p args] [p :var]))
-                                     ?type-def
-                                     ;; `(~'All ~(vec args) ~?type-def)
-                                     ))
-         ;; *type-def (parse-type-def {name :rec}
-         ;;                           (if (empty? args)
-         ;;                             ?type-def
-         ;;                             `(~'All ~(vec args) ~?type-def)))
+                                     ?type-def))
          :let [*type-def (if (empty? args)
                            [::&types/alias name *type-def]
-                           [::&types/all {} (vec args) [::&types/alias name *type-def]])
-               _ (prn 'defalias/*type-def *type-def)]]
+                           [::&types/all {} (vec args) [::&types/alias name *type-def]])]]
         (return state-seq-m [::defalias name *type-def])))
 
     (['fn ?local-name (?args :guard vector?) & ?body] :seq)
