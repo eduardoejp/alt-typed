@@ -95,6 +95,11 @@
             (nil)
             (defalias (Maybe x) (Or nil x))
 
+            (IntOrString)
+            (do (defalias IntOrString (Or java.lang.Integer java.lang.String))
+              (ann yolo IntOrString)
+              yolo)
+
             ((Or "YOLO" java.lang.Long))
             (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
               (let [result (parse-int "1234")]
@@ -377,7 +382,7 @@
   ;; MISSING: var-args
   ;; MISSING: macro-expansion.
   ;; MISSING: Scope handling (public vs private)
-  ;; Pre-inference annotating.
+  ;; MISSING: Pre-inference annotating.
   
   
   ;; The one below is not supposed to type-check due to lack of
@@ -406,6 +411,16 @@
   [(All [a b] [a -> b]) a -> b]
   (All [a b] [[a -> b] a -> b])
 
+
+  (run '(do (defalias IntOrString (Or java.lang.Integer java.lang.String))
+          (ann yolo IntOrString)
+          yolo))
+
+  (run '(do (ann-class (java.lang.List x) [java.lang.Object])
+          (defalias (RecTest x) (Or x (java.lang.List (RecTest x))))
+          (ann yolo (RecTest java.lang.Integer))
+          yolo
+          ))
   
   ;; Must fix issue with refining in order to get this to type-check.
   (run '(do (ann inc [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer])

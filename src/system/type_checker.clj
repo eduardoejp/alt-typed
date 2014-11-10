@@ -792,13 +792,13 @@
                                          (fn [[category members]]
                                            (if (= :ctor category)
                                              (exec state-seq-m
-                                               [=ctor (&parser/parse-type-def members)]
+                                               [=ctor (&parser/parse-type-def {} members)]
                                                (return state-seq-m [:ctor =ctor]))
                                              (exec state-seq-m
                                                [all-members+types (map-m state-seq-m
                                                                          (fn [[name type]]
                                                                            (exec state-seq-m
-                                                                             [=type (&parser/parse-type-def type)]
+                                                                             [=type (&parser/parse-type-def {} type)]
                                                                              (return state-seq-m [name =type])))
                                                                          members)]
                                                (return state-seq-m [category (into {} all-members+types)]))))
@@ -811,13 +811,11 @@
           (do ;; (println "DONE ANNOTATING")
               (return state-seq-m [::&type/nil]))))
     
-    [::&parser/defalias ?name ?params ?type-def]
-    (let [=type (if (empty? ?params)
-                  [::&type/alias ?name ?type-def]
-                  [::&type/type-ctor ?params [::&type/alias ?name ?type-def]])]
+    [::&parser/defalias ?name ?type-def]
+    (let [_ (prn ::&parser/defalias ?name ?type-def)]
       (exec state-seq-m
         [_ (&util/with-field* :types
-             (&type/define-type ?name =type))]
+             (&type/define-type ?name ?type-def))]
         (return state-seq-m [::&type/nil])))
 
     [::&parser/field-access ?field ?obj]

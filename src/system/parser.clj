@@ -61,8 +61,8 @@
          (return state-seq-m nil))]
     (return state-seq-m nil)))
 
-(defn parse-type-def [type-def]
-  ;; (prn 'parse-type-def type-def)
+(defn parse-type-def [local-syms type-def]
+  (prn 'parse-type-def type-def)
   (match type-def
     nil
     (return state-seq-m [::&types/nil])
@@ -111,21 +111,21 @@
     
     (['Or & ?params] :seq)
     (exec state-seq-m
-      [*types (map-m state-seq-m parse-type-def ?params)]
+      [*types (map-m state-seq-m (partial parse-type-def local-syms) ?params)]
       (return state-seq-m [::&types/union (vec *types)]))
 
     (['Not ?inner] :seq)
     (exec state-seq-m
-      [*inner (parse-type-def ?inner)]
+      [*inner (parse-type-def local-syms ?inner)]
       (return state-seq-m [::&types/complement *inner]))
 
     (['Eff ?data ?effs] :seq)
     (exec state-seq-m
-      [*data (parse-type-def ?data)
+      [*data (parse-type-def local-syms ?data)
        *effs (map-m state-seq-m
                     (fn [[k e]]
                       (exec state-seq-m
-                        [=e (parse-type-def e)]
+                        [=e (parse-type-def local-syms e)]
                         (return state-seq-m [k =e])))
                     ?effs)
        :let [*effs (into {} *effs)]
@@ -133,42 +133,52 @@
       (return state-seq-m [::&types/eff *data *effs]))
     
     (?name :guard symbol?)
-    (do ;; (prn '(?name :guard symbol?) `(~?name :guard ~'symbol?))
-        (&util/parallel [(exec state-seq-m
-                           [state (&util/with-field* :types
-                                    &util/get-state)
-                            ;; :let [_ (prn 'parse-type-def/symbol ?name (get-in state [:db ?name]) (get-in state [:db]))]
-                            ]
-                           (&util/with-field* :types
-                             (&types/resolve ?name)))
-                         (return state-seq-m ?name)]))
+    (do (prn 'parse-type-def '(?name :guard symbol?) ?name local-syms)
+      (&util/parallel [;; (case (get local-syms ?name)
+                       ;;   :var
+                       ;;   (return state-seq-m ?name)
+
+                       ;;   ;; :rec
+                       ;;   ;; (return state-seq-m [::&types/rec ?name])
+
+                       ;;   nil
+                       ;;   zero)
+                       (exec state-seq-m
+                         [state (&util/with-field* :types
+                                  &util/get-state)
+                          ;; :let [_ (prn 'parse-type-def/symbol ?name (get-in state [:db ?name]) (get-in state [:db]))]
+                          ]
+                         (&util/with-field* :types
+                           (&types/resolve ?name)))
+                       (return state-seq-m ?name)]))
     
     [& ?parts]
     (do ;; (prn '[& ?parts])
         (exec state-seq-m
-          [=arity (parse-arity parse-type-def type-def)
+          [=arity (parse-arity (partial parse-type-def local-syms) type-def)
            ;; :let [_ (prn '=arity =arity)]
            ]
           (return state-seq-m [::&types/function (list =arity)])))
 
     (['Fn & ?arities] :seq)
     (exec state-seq-m
-      [=arities (map-m state-seq-m (partial parse-arity parse-type-def) ?arities)]
+      [=arities (map-m state-seq-m (partial parse-arity (partial parse-type-def local-syms)) ?arities)]
       (return state-seq-m [::&types/function (vec =arities)]))
 
     (['All (?params :guard (every-pred vector? (partial every? symbol?))) ?def] :seq)
     (exec state-seq-m
-      [*def (parse-type-def ?def)]
+      [*def (parse-type-def (into local-syms (for [p ?params] [p :var])) ?def)]
       (return state-seq-m [::&types/all {} ?params *def]))
 
     ([?fn & ?params] :seq)
     (do ;; (prn '[?fn & ?params] [?fn ?params])
         (exec state-seq-m
-          [=type-fn (do ;; (prn '?fn ?fn)
-                        (&util/with-field* :types
-                          (&types/resolve ?fn)))
+          [;; =type-fn (do ;; (prn '?fn ?fn)
+           ;;              (&util/with-field* :types
+           ;;                (&types/resolve ?fn)))
+           =type-fn (parse-type-def local-syms ?fn)
            ;; :let [_ (prn '=type-fn =type-fn)]
-           =params (map-m state-seq-m parse-type-def ?params)
+           =params (map-m state-seq-m (partial parse-type-def local-syms) ?params)
            ;; :let [_ (prn '=params =params)]
            ]
           (&types/apply =type-fn =params)))
@@ -410,7 +420,7 @@
     (['ann (?var :guard symbol?) ?type-def] :seq)
     (do ;; (prn `[~'ann ~?var ~?type-def])
         (exec state-seq-m
-          [*type-def (parse-type-def ?type-def)
+          [*type-def (parse-type-def {} ?type-def)
            ;; :let [_ (prn '*type-def *type-def)]
            ]
           (return state-seq-m [::ann ?var *type-def])))
@@ -419,18 +429,34 @@
       (?parents :guard (every-pred vector? (partial every? type-ctor?)))
       & ?fields+methods] :seq)
     (exec state-seq-m
-      [:let [*type-ctor (parse-type-ctor ?class)
+      [:let [[_ params :as *type-ctor] (parse-type-ctor ?class)
              ;; _ (prn '*type-ctor *type-ctor)
              ;; _ (prn '*parents *parents)
              ]
-       *parents (map-m state-seq-m parse-type-def ?parents)]
+       *parents (map-m state-seq-m (partial parse-type-def (into {} (for [p params] [p :var]))) ?parents)]
       (return state-seq-m [::ann-class *type-ctor (vec *parents) ?fields+methods]))
 
     (['defalias (?ctor :guard type-ctor?) ?type-def] :seq)
-    (let [[name args] (if (symbol? ?ctor)
+    (let [_ (prn 'defalias/?ctor ?ctor)
+          [name args] (if (symbol? ?ctor)
                         [?ctor []]
-                        [(first ?ctor) (rest ?ctor)])]
-      (return state-seq-m [::defalias name args (parse-type-def ?type-def)]))
+                        [(first ?ctor) (vec (rest ?ctor))])]
+      (exec state-seq-m
+        [*type-def (if (empty? args)
+                     (parse-type-def {name :rec} ?type-def)
+                     (parse-type-def (into {name :rec} (for [p args] [p :var]))
+                                     ?type-def
+                                     ;; `(~'All ~(vec args) ~?type-def)
+                                     ))
+         ;; *type-def (parse-type-def {name :rec}
+         ;;                           (if (empty? args)
+         ;;                             ?type-def
+         ;;                             `(~'All ~(vec args) ~?type-def)))
+         :let [*type-def (if (empty? args)
+                           [::&types/alias name *type-def]
+                           [::&types/all {} (vec args) [::&types/alias name *type-def]])
+               _ (prn 'defalias/*type-def *type-def)]]
+        (return state-seq-m [::defalias name *type-def])))
 
     (['fn ?local-name (?args :guard vector?) & ?body] :seq)
     (exec state-seq-m

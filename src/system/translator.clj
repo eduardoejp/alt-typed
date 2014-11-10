@@ -63,6 +63,9 @@
                          [?name :< (type->code ?top)])
                       ?vars)]
       `(~'All ~vars* ~(type->code ?poly)))
+
+    [::&type/alias ?name ?type-def]
+    ?name
     
     (?type-var :guard symbol?)
     ?type-var

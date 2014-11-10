@@ -86,7 +86,7 @@
 
 (defn resolve [type-name]
   (fn [^Types state]
-    ;; (prn `resolve type-name state)
+    (prn `resolve type-name state)
     (when-let [type (-> state .-db (get type-name))]
       (list [state type]))))
 
@@ -477,10 +477,10 @@
     false))
 
 (defn instantiate* [name params]
-  ;; (prn 'instantiate* name params)
+  (prn 'instantiate* name params)
   (exec state-seq-m
     [=type-fn (resolve name)
-     ;; :let [_ (prn '=type-fn)]
+     :let [_ (prn '=type-fn)]
      ]
     (if (type-fn? =type-fn)
       (apply =type-fn params)
