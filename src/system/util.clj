@@ -1,76 +1,44 @@
 (ns system.util)
 
 ;; [Interface]
-;; Protocols
-(defprotocol Monad
-  (bind [monad m-value step])
-  (return [monad value]))
+(defn bind [m-value step]
+  #(for [[state* datum] (m-value %)
+         result ((step datum) state*)]
+     result))
 
-;; Implementations
-(def state-seq-m
-  (reify Monad
-    (bind [self m-value step]
-      #(for [[state* datum] (m-value %)
-             result ((step datum) state*)]
-         result))
-    (return [self value]
-      #(list [% value]))))
+(defn return [value]
+  #(list [% value]))
 
-(def state-maybe-m
-  (reify Monad
-    (bind [self m-value step]
-      #(if-let [[state* datum] (m-value %)]
-         ((step datum) state*)))
-    (return [self value]
-      #(vector % value))))
-
-(def state-m
-  (reify Monad
-    (bind [self m-value step]
-      #(let [[state* datum] (m-value %)]
-         ((step datum) state*)))
-    (return [self value]
-      #(vector % value))))
-
-(def maybe-m
-  (reify Monad
-    (bind [self m-value step]
-      (if (nil? m-value)
-        nil
-        (step m-value)))
-    (return [self value]
-      value)))
+(def zero (fn [state] (list)))
 
 ;; Syntax
-(defmacro exec [monad steps return]
+(defmacro exec [steps return]
   (assert (not= 0 (count steps)) "The steps can't be empty!")
   (assert (= 0 (rem (count steps) 2)) "The number of steps must be even!")
   (reduce (fn [inner [label computation]]
             (case label
               :let `(let ~computation ~inner)
+              :when `(if ~computation
+                       ~inner
+                       zero)
               ;; else
-              `(bind ~monad ~computation (fn [~label] ~inner))))
+              `(bind ~computation (fn [~label] ~inner))))
           return
           (reverse (partition 2 steps))))
 
 ;; Functions
-(defn map-m [monad f inputs]
+(defn map-m [f inputs]
   (if (empty? inputs)
-    (return monad '())
-    (exec monad
-      [output (f (first inputs))
-       outputs (map-m monad f (rest inputs))]
-      (return monad (conj outputs output)))))
+    (return '())
+    (exec [output (f (first inputs))
+           outputs (map-m f (rest inputs))]
+      (return (conj outputs output)))))
 
-(defn reduce-m [monad f init inputs]
+(defn reduce-m [f init inputs]
   (if (empty? inputs)
-    (return monad init)
-    (exec monad
-      [next (f init (first inputs))]
-      (reduce-m monad f next (rest inputs)))))
-
-;; Only for state-seq monad...
-(def zero (fn [state] (list)))
+    (return init)
+    (exec [next (f init (first inputs))]
+      (reduce-m f next (rest inputs)))))
 
 (defn return-all [data]
   #(for [datum data]
@@ -79,11 +47,11 @@
 (def get-state
   #(list [% %]))
 
-(defn parallel [steps]
+(defn try-all [steps]
   (fn [state]
     (some identity (map #(seq (% state)) steps))))
 
-(defn parallel* [steps]
+(defn parallel [steps]
   (fn [state]
     (mapcat #(% state) steps)))
 
@@ -91,15 +59,10 @@
   #(list [% (step %)]))
 
 (defn spread [returns]
-  (fn [state] returns))
+  (fn [state]
+    returns))
 
 (defn with-field [field monad]
-  (fn [state]
-    (if-let [[inner* return-val] (monad (field state))]
-      (list [(assoc state field inner*) return-val])
-      '())))
-
-(defn with-field* [field monad]
   (fn [state]
     (for [[inner* return-val] (monad (field state))]
       [(assoc state field inner*) return-val])))

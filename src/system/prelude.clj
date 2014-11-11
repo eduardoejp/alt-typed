@@ -1,12 +1,10 @@
 (ns system.prelude
-  (:require (system [util :as &util :refer [state-seq-m exec
-                                            map-m reduce-m
-                                            zero return return-all]])
+  (:require (system [util :as &util :refer [exec
+                                            zero return return-all
+                                            map-m reduce-m]])
             (system.prelude [java-lang :as &java-lang])))
 
 ;; [Interface]
 (def install
-  (exec state-seq-m
-    [_ &java-lang/install
-     state &util/get-state]
-    (return state-seq-m nil)))
+  (exec [_ &java-lang/install]
+    (return nil)))

@@ -3,16 +3,16 @@
   (:require (clojure [set :as set]
                      [template :refer [do-template]])
             [clojure.core.match :refer [match]]
-            (system [util :as &util :refer [state-seq-m exec
+            (system [util :as &util :refer [exec
                                             map-m reduce-m
                                             zero return return-all]])))
 
-(declare $or $and apply)
+(declare $or $and apply
+         solve)
 
 ;; [Data]
-(defrecord TypeVars [counter mappings])
-(defrecord BoundTypes [counter mappings])
-(defrecord Types [db vars bound class-hierarchy casts members])
+(defrecord TypeHeap [counter mappings])
+(defrecord Types [db heap class-hierarchy casts members])
 
 ;; [Utils]
 (defn ^:private defined? [hierarchy class]
@@ -25,57 +25,146 @@
 (def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
 (def +truthy+ [::complement +falsey+])
 
-(def +init+ (Types. {} (TypeVars. 0 {}) (BoundTypes. 0 {}) (make-hierarchy) {} {}))
+(def +init+ (Types. {} (TypeHeap. 0 {}) (make-hierarchy) {} {}))
+
+;; Monads / holes
+(def fresh-hole
+  (fn [^Types state]
+    (let [id (-> state ^TypeHeap (.-heap) .-counter)]
+      (list [(update-in state [:heap]
+                        #(-> %
+                             (update-in [:counter] inc)
+                             (assoc-in [:mappings id] [::interval [::any] [::nothing]])))
+             [::hole id]]))))
+
+(defn get-hole [hole]
+  (match hole
+    [::hole ?id]
+    (fn [^Types state]
+      (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
+        (if (contains? mappings ?id)
+          (let [=type (get mappings ?id)]
+            (match =type
+              [::hole _]
+              ((get-hole =type) state)
+              
+              :else
+              (list [state =type])))
+          '())))))
+
+(defn narrow-hole [hole top bottom]
+  (match hole
+    [::hole ?id]
+    (exec [interval (get-hole hole)
+           :let [[?top ?bottom] (match interval
+                                  [::interval ?top ?bottom]
+                                  [?top ?bottom])]
+           _ (solve ?top top)
+           _ (solve bottom ?bottom)]
+      (fn [state]
+        (list [(assoc-in state [:heap :mappings ?id] [::interval top bottom]) nil])))))
+
+(defn redirect-hole [from to]
+  (prn 'redirect-hole from to)
+  (match [from to]
+    [[::hole ?id] [::hole _]]
+    (fn [state]
+      (list [(assoc-in state [:heap :mappings ?id] to) nil]))))
+
+(defn normalize-hole [hole]
+  (prn 'normalize-hole hole)
+  (match hole
+    [::hole ?id]
+    (fn [^Types state]
+      (if-let [=type (-> state ^TypeHeap (.-heap) .-mappings (get ?id))]
+        (match =type
+          [::hole _]
+          ((normalize-hole =type) state)
+          
+          :else
+          (list [state hole]))
+        '()))))
 
 ;; Monads / vars
 (def fresh-var
   (fn [^Types state]
-    (let [id (-> state ^TypeVars (.-vars) .-counter)]
-      (list [(-> state
-                 (update-in [:vars :counter] inc)
-                 (assoc-in [:vars :mappings id] [::interval [::any] [::nothing]]))
+    (let [id (-> state ^TypeHeap (.-heap) .-counter)]
+      (list [(update-in state [:heap]
+                        #(-> %
+                             (update-in [:counter] inc)
+                             (assoc-in [:mappings id] nil)))
              [::var id]]))))
+
+(defn bind-var [type-var type]
+  (match type-var
+    [::var ?id]
+    (fn [^Types state]
+      (let [mappings (-> state ^TypeHeap (.-heap) .-mappings)]
+        (if (and (contains? mappings ?id)
+                 (nil? (get mappings ?id)))
+          (list [(assoc-in state [:heap :mappings ?id] type) nil])
+          '())))))
+
+(defn rebind-var [type-var type]
+  (match type-var
+    [::var ?id]
+    (fn [^Types state]
+      (let [mappings (-> state ^TypeHeap (.-heap) .-mappings)]
+        (if (and (contains? mappings ?id)
+                 (boolean (get mappings ?id)))
+          (list [(assoc-in state [:heap :mappings ?id] type) nil])
+          '())))))
+
+(defn bound-var? [type-var]
+  (match type-var
+    [::var ?id]
+    (fn [^Types state]
+      (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
+        (if (contains? mappings ?id)
+          (list [state (boolean (get mappings ?id))])
+          '())))))
 
 (defn deref-var [type-var]
   (match type-var
     [::var ?id]
     (fn [^Types state]
-      (when-let [=interval (-> state ^TypeVars (.-vars) .-mappings (get ?id))]
-        (list [state =interval])))))
+      (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
+        (if-let [=type (get mappings ?id)]
+          (list [state =type])
+          '())))))
 
-(defn deref-binding [binding]
-  (match binding
-    [::bound ?id]
-    (fn [^Types state]
-      (when-let [=type (-> state ^BoundTypes (.-bound) .-mappings (get ?id))]
-        (list [state =type])))))
-
-(defn update-var [type-var interval]
-  (match type-var
-    [::var ?id]
-    (fn [^Types state]
-      (if (-> state ^TypeVars (.-vars) .-mappings (get ?id))
-        (list [(assoc-in state [:vars :mappings ?id] interval) nil])))
-    ))
-
-(defn update-binding [binding type]
-  (match binding
-    [::bound ?id]
-    (fn [state]
-      (list [(assoc-in state [:bound :mappings ?id] type) nil]))))
-
-;; Monads / bound type-vars
-(defn bind [type]
+;; Monads / refs
+(defn create-ref [type]
   (fn [^Types state]
-    (let [id (-> state ^BoundTypes (.-bound) .-counter)]
-      (list [(-> state
-                 (update-in [:bound :counter] inc)
-                 (assoc-in [:bound :mappings id] type))
-             [::bound id]]))))
+    (let [id (-> state ^TypeHeap (.-heap) .-counter)]
+      (list [(update-in state [:heap]
+                        #(-> %
+                             (update-in [:counter] inc)
+                             (assoc-in [:mappings id] type)))
+             [::ref id]]))))
 
-(defn unbind [id]
-  (fn [^Types state]
-    (list [(update-in state [:bound :mappings] dissoc id) nil])))
+(do-template [<fn> <return>]
+  (defn <fn> [ref]
+    (match ref
+      [::ref ?id]
+      (fn [^Types state]
+        (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
+          (if (contains? mappings ?id)
+            (list <return>)
+            '())))))
+
+  get-ref    [state (get mappings ?id)]
+  delete-ref [(update-in state [:heap :mappings] dissoc ?id) nil]
+  )
+
+(defn set-ref [ref type]
+  (match ref
+    [::ref ?id]
+    (fn [^Types state]
+      (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
+        (if (contains? mappings ?id)
+          (list [(assoc-in state [:heap :mappings ?id] type) nil])
+          '())))))
 
 ;; Monads / DB
 (defn define-type [type-name type-def]
@@ -93,43 +182,39 @@
   (symbol "java::class" (name class)))
 
 (defn define-class [[class params] parents]
-  (&util/parallel [(exec state-seq-m
-                     [_ (resolve class)]
-                     zero)
-                   (exec state-seq-m
-                     [:let [=instance (if (empty? params)
-                                        [::object class []]
-                                        [::all {} params [::object class params]])]
-                      _ (define-type class =instance)]
-                     (fn [^Types state]
-                       (let [class-name (qualify-class class)]
-                         (if (not (defined? (.-class-hierarchy state) class-name))
-                           (let [hierarchy* (reduce #(derive %1 class-name %2)
-                                                    (.-class-hierarchy state)
-                                                    (for [[_ class _] parents] (qualify-class class)))]
-                             (list [(-> state
-                                        (assoc :class-hierarchy hierarchy*)
-                                        (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
-                                                                                 [p-class [::all {} params [::object p-class p-params]]])
-                                                                               parents))))
-                                    nil]))
-                           '()))
-                       ))]))
+  (&util/try-all [(exec [_ (resolve class)]
+                    zero)
+                  (exec [:let [=instance (if (empty? params)
+                                           [::object class []]
+                                           [::all {} params [::object class params]])]
+                         _ (define-type class =instance)]
+                    (fn [^Types state]
+                      (let [class-name (qualify-class class)]
+                        (if (not (defined? (.-class-hierarchy state) class-name))
+                          (let [hierarchy* (reduce #(derive %1 class-name %2)
+                                                   (.-class-hierarchy state)
+                                                   (for [[_ class _] parents] (qualify-class class)))]
+                            (list [(-> state
+                                       (assoc :class-hierarchy hierarchy*)
+                                       (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
+                                                                                [p-class [::all {} params [::object p-class p-params]]])
+                                                                              parents))))
+                                   nil]))
+                          '()))
+                      ))]))
 
 (defn define-class-members [class all-members]
-  ;; members {decode {:static-methods {java.lang.Long [java.lang.String -> java.lang.Long]}}}
-  (exec state-seq-m
-    [=class (resolve class)
-     :let [wrap (match =class
-                  [::object _ _]
-                  (fn [=type]
-                    [::function (list [::arity [=class] =type])])
-                  
-                  [::all ?env ?params ?instance-type]
-                  (fn [=type]
-                    [::all ?env ?params
-                     [::function (list [::arity [?instance-type] =type])]])
-                  )]]
+  (exec [=class (resolve class)
+         :let [wrap (match =class
+                      [::object _ _]
+                      (fn [=type]
+                        [::function (list [::arity [=class] =type])])
+                      
+                      [::all ?env ?params ?instance-type]
+                      (fn [=type]
+                        [::all ?env ?params
+                         [::function (list [::arity [?instance-type] =type])]])
+                      )]]
     (fn [^Types state]
       (list [(update-in state [:members]
                         (fn [members]
@@ -185,169 +270,192 @@
 (defn upcast [target-type type]
   (match [target-type type]
     [::$fn [::function ?arities]]
-    (return state-seq-m type)
+    (return type)
 
     [::$fn [::literal 'clojure.lang.Keyword _]]
-    (return state-seq-m [::function (list [::arity (list [::object 'Map []]) [::any]])])
+    (return [::function (list [::arity (list [::object 'Map []]) [::any]])])
 
     [::$fn [::literal 'clojure.lang.Symbol _]]
-    (return state-seq-m [::function (list [::arity (list [::object 'Map []]) [::any]])])
+    (return [::function (list [::arity (list [::object 'Map []]) [::any]])])
 
     [::$fn [::object 'clojure.lang.IPersistentVector [?elem]]]
-    (return state-seq-m [::function (list [::arity (list [::object 'java.lang.Long []]) ?elem])])
+    (return [::function (list [::arity (list [::object 'java.lang.Long []]) ?elem])])
 
     [::$fn [::object 'clojure.lang.IPersistentMap [?key ?val]]]
-    (return state-seq-m [::function (list [::arity (list ?key) [::union (list [::nil] ?val)]])])
+    (return [::function (list [::arity (list ?key) [::union (list [::nil] ?val)]])])
 
     [::$fn [::object 'clojure.lang.IPersistentSet [?elem]]]
-    (return state-seq-m [::function (list [::arity (list ?elem) [::union (list [::nil] ?elem)]])])
+    (return [::function (list [::arity (list ?elem) [::union (list [::nil] ?elem)]])])
     
     [(?target-class :guard symbol?) [::object ?source-class ?params]]
     (if (= ?target-class ?source-class)
-      (return state-seq-m type)
-      (exec state-seq-m
-        [? (super-class? ?target-class ?source-class)
-         _ (if ?
-             (return state-seq-m nil)
-             zero)
-         family-line (lineage ?source-class ?target-class)
-         ^Types types &util/get-state
-         :let [casts (.-casts types)]]
-        (reduce-m state-seq-m
-                  (fn [current next-class]
-                    (match current
-                      [::object ?current-class ?params]
-                      (let [=type-fn (get-in casts [?current-class next-class])]
-                        (apply =type-fn ?params))))
-                  type
-                  family-line)
+      (return type)
+      (exec [? (super-class? ?target-class ?source-class)
+             _ (if ?
+                 (return nil)
+                 zero)
+             family-line (lineage ?source-class ?target-class)
+             ^Types types &util/get-state
+             :let [casts (.-casts types)]]
+        (reduce-m
+         (fn [current next-class]
+           (match current
+             [::object ?current-class ?params]
+             (let [=type-fn (get-in casts [?current-class next-class])]
+               (apply =type-fn ?params))))
+         type
+         family-line)
         ;; (upcast target-type [::object ?target-class []])
         ))
     ))
 
 (defn solve [expected actual]
+  (prn 'solve expected actual)
   (match [expected actual]
-    [_ [::bound _]]
-    (exec state-seq-m
-      [=type (deref-binding actual)
-       _ (solve expected =type)]
-      (return state-seq-m true))
+    [[::var _] _]
+    (exec [? (bound-var? expected)
+           :let [_ (prn '[::var _] expected ? actual)]]
+      (if ?
+        (exec [=type (deref-var expected)]
+          (solve =type actual))
+        (bind-var expected actual)))
 
-    [[::var ?e-id] [::var ?a-id]]
+    [[::hole ?e-id] [::hole ?a-id]]
     (if (= ?e-id ?a-id)
-      (return state-seq-m true)
-      (exec state-seq-m
-        [=interval-e (deref-var expected)
-         =interval-a (deref-var actual)
-         :let [[=top-e =bottom-e] (match =interval-e
-                                    [::interval =top =bottom]
-                                    [=top =bottom])
-               [=top-a =bottom-a] (match =interval-a
-                                    [::interval =top =bottom]
-                                    [=top =bottom])]
-         _ (solve =top-e =top-a)
-         _ (solve =bottom-a =bottom-e)
-         _ (update-var expected [::interval =top-a =bottom-a])]
-        (return state-seq-m true)))
+      (return true)
+      (exec [=interval-e (get-hole expected)
+             =interval-a (get-hole actual)
+             :let [[=top-e =bottom-e] (match =interval-e
+                                        [::interval =top =bottom]
+                                        [=top =bottom])
+                   [=top-a =bottom-a] (match =interval-a
+                                        [::interval =top =bottom]
+                                        [=top =bottom])]
+             _ (solve =top-e =top-a)
+             _ (solve =bottom-a =bottom-e)
+             _ (redirect-hole expected actual)]
+        (return true)))
+
+    [_ [::hole _]]
+    (exec [=interval (get-hole actual)
+           :let [[=top =bottom] (match =interval
+                                  [::interval =top =bottom]
+                                  [=top =bottom])]]
+      (&util/parallel [(solve expected =top)
+                       (exec [_ (solve =top expected)
+                              _ (solve expected =bottom)
+                              _ (narrow-hole actual expected =bottom)]
+                         (return true))]))
+
+    [_ [::ref _]]
+    (exec [=type (get-ref actual)]
+      (solve expected =type))
+
+    ;; [[::var ?e-id] [::var ?a-id]]
+    ;; (if (= ?e-id ?a-id)
+    ;;   (return true)
+    ;;   (exec
+    ;;     [=interval-e (deref-var expected)
+    ;;      =interval-a (deref-var actual)
+    ;;      :let [[=top-e =bottom-e] (match =interval-e
+    ;;                                 [::interval =top =bottom]
+    ;;                                 [=top =bottom])
+    ;;            [=top-a =bottom-a] (match =interval-a
+    ;;                                 [::interval =top =bottom]
+    ;;                                 [=top =bottom])]
+    ;;      _ (solve =top-e =top-a)
+    ;;      _ (solve =bottom-a =bottom-e)
+    ;;      _ (update-var expected [::interval =top-a =bottom-a])]
+    ;;     (return true)))
+
+    ;; [[::var ?e-id] _]
+    ;; (exec
+    ;;   [=interval (deref-var expected)
+    ;;    :let [[=top =bottom] (match =interval
+    ;;                           [::interval =top =bottom]
+    ;;                           [=top =bottom])]
+    ;;    _ (solve =top actual)
+    ;;    _ (solve actual =bottom)
+    ;;    _ (update-var expected [::interval actual =bottom])]
+    ;;   (return true))
     
-    [[::var ?e-id] _]
-    (exec state-seq-m
-      [=interval (deref-var expected)
-       :let [[=top =bottom] (match =interval
-                              [::interval =top =bottom]
-                              [=top =bottom])]
-       _ (exec state-seq-m
-           [_ (solve =top actual)
-            _ (update-var expected [::interval actual =bottom])]
-           (return state-seq-m true))]
-      (return state-seq-m true))
-    
-    [_ [::var _]]
-    (exec state-seq-m
-      [=interval (deref-var actual)
-       :let [[=top =bottom] (match =interval
-                              [::interval =top =bottom]
-                              [=top =bottom])]
-       _ (&util/parallel [(solve expected =top)
-                          (exec state-seq-m
-                            [_ (solve =top expected)
-                             _ (update-var actual [::interval expected =bottom])]
-                            (return state-seq-m true))])]
-      (return state-seq-m true))
+    ;; [_ [::var _]]
+    ;; (exec
+    ;;   [=interval (deref-var actual)
+    ;;    :let [[=top =bottom] (match =interval
+    ;;                           [::interval =top =bottom]
+    ;;                           [=top =bottom])]]
+    ;;   (&util/parallel [(solve expected =top)
+    ;;                    (exec
+    ;;                      [_ (solve =top expected)
+    ;;                       _ (solve expected =bottom)
+    ;;                       _ (update-var actual [::interval expected =bottom])]
+    ;;                      (return true))]))
 
     [[::any] _]
-    (return state-seq-m true)
+    (return true)
 
     [_ [::nothing]]
-    (return state-seq-m true)
+    (return true)
 
     [[::nil] [::nil]]
-    (return state-seq-m true)
+    (return true)
 
     [[::literal ?e-class ?e-value] [::literal ?a-class ?a-value]]
     (if (and (= ?e-class ?a-class)
              (= ?e-value ?a-value))
-      (return state-seq-m true)
+      (return true)
       zero)
 
     [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
-    (exec state-seq-m
-      [? (super-class? ?class ?lit-class)]
+    (exec [? (super-class? ?class ?lit-class)]
       (if ?
-        (return state-seq-m true)
+        (return true)
         zero))
 
     [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
     (if (= ?e-class ?a-class)
-      (exec state-seq-m
-        [_ (map-m state-seq-m
-                  (fn [[e a]] (solve e a))
-                  (map vector ?e-params ?a-params))]
-        (return state-seq-m true))
-      (exec state-seq-m
-        [=actual (upcast ?e-class actual)]
+      (exec [_ (map-m
+                (fn [[e a]] (solve e a))
+                (map vector ?e-params ?a-params))]
+        (return true))
+      (exec [=actual (upcast ?e-class actual)]
         (solve expected =actual)))
 
     [[::tuple ?e-parts] [::tuple ?a-parts]]
     (if (<= (count ?e-parts) (count ?a-parts))
-      (exec state-seq-m
-        [_ (map-m state-seq-m
-                  (fn [[e a]] (solve e a))
-                  (map vector ?e-parts ?a-parts))]
-        (return state-seq-m true))
+      (exec [_ (map-m
+                (fn [[e a]] (solve e a))
+                (map vector ?e-parts ?a-parts))]
+        (return true))
       zero)
 
     [[::object ?e-class ?e-params] [::tuple ?a-parts]]
-    (exec state-seq-m
-      [=elems (if (empty? ?a-parts)
-                (return state-seq-m [::nothing])
-                ($or ?a-parts))]
+    (exec [=elems (if (empty? ?a-parts)
+                    (return [::nothing])
+                    ($or ?a-parts))]
       (solve expected [::object 'clojure.lang.IPersistentVector [=elems]]))
     
     [[::object ?e-class ?e-params] [::record ?a-entries]]
-    (exec state-seq-m
-      [[=keys =vals] (if (empty? ?a-entries)
-                       (return state-seq-m [[::nothing] [::nothing]])
-                       (exec state-seq-m
-                         [=keys ($or (keys ?a-entries))
-                          =vals ($or (vals ?a-entries))]
-                         (return state-seq-m [=keys =vals])))]
+    (exec [[=keys =vals] (if (empty? ?a-entries)
+                           (return [[::nothing] [::nothing]])
+                           (exec [=keys ($or (keys ?a-entries))
+                                  =vals ($or (vals ?a-entries))]
+                             (return [=keys =vals])))]
       (solve expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
     
     [[::record ?e-entries] [::record ?a-entries]]
     (if (set/superset? (set (keys ?e-entries)) (set (keys ?a-entries)))
-      (exec state-seq-m
-        [_ (map-m state-seq-m
-                  (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
-                  (keys ?e-entries))]
-        (return state-seq-m true))
+      (exec [_ (map-m
+                (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
+                (keys ?e-entries))]
+        (return true))
       zero)
 
     [[::union ?types] _]
-    (exec state-seq-m
-      [=type (return-all ?types)
-       _ (solve =type actual)]
-      (return state-seq-m true))
+    (exec [=type (return-all ?types)
+           _ (solve =type actual)]
+      (return true))
 
     [[::complement ?type] _]
     (fn [state]
@@ -357,7 +465,7 @@
         (zero nil)))
 
     [[::io] [::io]]
-    (return state-seq-m true)
+    (return true)
 
     :else
     zero
@@ -367,41 +475,36 @@
 (defn ^:private realize [bindings type]
   (match type
     [::object ?class ?params]
-    (exec state-seq-m
-      [=params (map-m state-seq-m (partial realize bindings) ?params)]
-      (return state-seq-m [::object ?class (vec =params)]))
+    (exec [=params (map-m (partial realize bindings) ?params)]
+      (return [::object ?class (vec =params)]))
     
     [::union ?types]
-    (exec state-seq-m
-      [=types (map-m state-seq-m (partial realize bindings) ?types)]
-      (return state-seq-m [::union (vec =types)]))
+    (exec [=types (map-m (partial realize bindings) ?types)]
+      (return [::union (vec =types)]))
 
     [::complement ?type]
-    (exec state-seq-m
-      [=type (realize bindings ?type)]
-      (return state-seq-m [::complement =type]))
+    (exec [=type (realize bindings ?type)]
+      (return [::complement =type]))
 
     [::function ?arities]
-    (exec state-seq-m
-      [=arities (map-m state-seq-m (partial realize bindings) ?arities)]
-      (return state-seq-m [::function =arities]))
+    (exec [=arities (map-m (partial realize bindings) ?arities)]
+      (return [::function =arities]))
 
     [::arity ?args ?return]
-    (exec state-seq-m
-      [=args (map-m state-seq-m (partial realize bindings) ?args)
-       =return (realize bindings ?return)]
-      (return state-seq-m [::arity =args =return]))
+    (exec [=args (map-m (partial realize bindings) ?args)
+           =return (realize bindings ?return)]
+      (return [::arity =args =return]))
 
     (?token :guard symbol?)
     (if-let [=var (get bindings ?token)]
-      (return state-seq-m =var)
+      (return =var)
       zero)
 
     [::all ?env ?params ?type-def]
-    (return state-seq-m [::all (merge bindings ?env) ?params ?type-def])
+    (return [::all (merge bindings ?env) ?params ?type-def])
     
     :else
-    (return state-seq-m type)
+    (return type)
     ))
 
 (defn apply [type-fn params]
@@ -418,12 +521,11 @@
 (defn instantiate [type]
   (match type
     [::all _ ?params _]
-    (exec state-seq-m
-      [=params (map-m state-seq-m (constantly fresh-var) ?params)]
+    (exec [=params (map-m (constantly fresh-var) ?params)]
       (apply type =params))
     
     :else
-    (return state-seq-m type)))
+    (return type)))
 
 (defn type-fn? [type]
   (match type
@@ -434,53 +536,47 @@
     false))
 
 (defn instantiate* [name params]
-  (exec state-seq-m
-    [=type-fn (resolve name)]
+  (exec [=type-fn (resolve name)]
     (if (type-fn? =type-fn)
       (apply =type-fn params)
-      (return state-seq-m =type-fn))))
+      (return =type-fn))))
 
 ;; Monads / Types
 (do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]
   (letfn [(adder [base addition]
             (match [base addition]
               [_ [<tag> ?addition]]
-              (reduce-m state-seq-m adder base ?addition)
+              (reduce-m adder base ?addition)
               
               [[<tag> ?base] _]
-              (exec state-seq-m
-                [veredicts (map-m state-seq-m
-                                  (fn [=base]
-                                    (&util/parallel [(exec state-seq-m
-                                                       [_ (solve =base addition)]
-                                                       (return state-seq-m <LT>))
-                                                     (exec state-seq-m
-                                                       [_ (solve addition =base)]
-                                                       (return state-seq-m <GT>))
-                                                     (return state-seq-m :peer)]))
-                                  ?base)]
+              (exec [veredicts (map-m
+                                (fn [=base]
+                                  (&util/try-all [(exec [_ (solve =base addition)]
+                                                    (return <LT>))
+                                                  (exec [_ (solve addition =base)]
+                                                    (return <GT>))
+                                                  (return :peer)]))
+                                ?base)]
                 (cond (some (partial = :parent) veredicts)
-                      (return state-seq-m base)
+                      (return base)
 
                       (every? (partial = :peer) veredicts)
-                      (return state-seq-m [<tag> (conj ?base addition)])
+                      (return [<tag> (conj ?base addition)])
 
                       :else
                       (if-let [rem-types (->> (map vector ?base veredicts)
                                               (filter (comp (partial not= :child) second))
                                               (map first)
                                               seq)]
-                        (return state-seq-m [<tag> (conj (vec rem-types) addition)])
-                        (return state-seq-m addition))))
+                        (return [<tag> (conj (vec rem-types) addition)])
+                        (return addition))))
               
               [_ _]
-              (&util/parallel [(exec state-seq-m
-                                 [_ (solve base addition)]
-                                 (return state-seq-m <LT-ret>))
-                               (exec state-seq-m
-                                 [_ (solve addition base)]
-                                 (return state-seq-m <GT-ret>))
-                               (return state-seq-m [<tag> [base addition]])])
+              (&util/try-all [(exec [_ (solve base addition)]
+                                (return <LT-ret>))
+                              (exec [_ (solve addition base)]
+                                (return <GT-ret>))
+                              (return [<tag> [base addition]])])
               ))]
     (defn <fn> [types]
       (match (vec types)
@@ -488,7 +584,7 @@
         zero
         
         [type & others]
-        (reduce-m state-seq-m adder type others)
+        (reduce-m adder type others)
         )))
 
   $or  ::union        base     addition :parent :child
@@ -498,20 +594,18 @@
 (let [adder (fn [t1 t2]
               (match [t1 t2]
                 [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
-                (exec state-seq-m
-                  [=effs (map-m state-seq-m
-                                (fn [key]
-                                  (exec state-seq-m
-                                    [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
-                                    (return state-seq-m [key =merged])))
-                                (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
-                  (return state-seq-m [::eff ?data-2 =effs]))
+                (exec [=effs (map-m
+                              (fn [key]
+                                (exec [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
+                                  (return [key =merged])))
+                              (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
+                  (return [::eff ?data-2 =effs]))
                 
                 [[::eff ?data-1 ?effs-1] _]
-                (return state-seq-m [::eff t2 ?effs-1])
+                (return [::eff t2 ?effs-1])
                 
                 [_ _]
-                (return state-seq-m t2)
+                (return t2)
                 ))]
   (defn sequentially-combine-types [types]
     (match (vec types)
@@ -519,30 +613,26 @@
       zero
 
       [?init & ?others]
-      (reduce-m state-seq-m adder ?init ?others))))
+      (reduce-m adder ?init ?others))))
 
 (let [adder (fn [t1 t2]
               (match [t1 t2]
                 [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
-                (exec state-seq-m
-                  [=data ($or [?data-1 ?data-2])
-                   =effs (map-m state-seq-m
-                                (fn [key]
-                                  (exec state-seq-m
-                                    [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
-                                    (return state-seq-m [key =merged])))
-                                (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
-                  (return state-seq-m [::eff =data =effs]))
+                (exec [=data ($or [?data-1 ?data-2])
+                       =effs (map-m
+                              (fn [key]
+                                (exec [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
+                                  (return [key =merged])))
+                              (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
+                  (return [::eff =data =effs]))
                 
                 [[::eff ?data-1 ?effs-1] _]
-                (exec state-seq-m
-                  [=data ($or [?data-1 t2])]
-                  (return state-seq-m [::eff =data ?effs-1]))
+                (exec [=data ($or [?data-1 t2])]
+                  (return [::eff =data ?effs-1]))
                 
                 [_ [::eff ?data-2 ?effs-2]]
-                (exec state-seq-m
-                  [=data ($or [t1 ?data-2])]
-                  (return state-seq-m [::eff =data ?effs-2]))
+                (exec [=data ($or [t1 ?data-2])]
+                  (return [::eff =data ?effs-2]))
                 
                 [_ _]
                 ($or [t1 t2])
@@ -553,4 +643,4 @@
       zero
 
       [?init & ?others]
-      (reduce-m state-seq-m adder ?init ?others))))
+      (reduce-m adder ?init ?others))))
