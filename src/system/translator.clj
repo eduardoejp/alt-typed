@@ -58,8 +58,8 @@
                          (?name :guard symbol?)
                          ?name
 
-                         [(?name :guard symbol?) :< ?top]
-                         [?name :< (type->code ?top)])
+                         [(?name :guard symbol?) '< ?top]
+                         [?name '< (type->code ?top)])
                       ?vars)]
       `(~'All ~vars* ~(type->code ?poly)))
 

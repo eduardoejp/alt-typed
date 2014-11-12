@@ -355,7 +355,7 @@
             (java.lang.Long)
             (new java.lang.Long "YOLO")
 
-            ((All [[a :< (java.lang.Map Any Any)]] [a -> a]))
+            ((All [[a < (java.lang.Map Any Any)]] [a -> a]))
             (do (ann-class (java.lang.Map key val) [java.lang.Object])
               (ann map? (Fn [(java.lang.Map Any Any) -> true]
                             [(Not (java.lang.Map Any Any)) -> false]))
@@ -367,6 +367,14 @@
             (fn _ [f x]
               (f x))
             )))
+
+  
+
+  (run '(do (ann inc [java.lang.Long -> java.lang.Long])
+          (loop [a 0]
+            (if (= 10 a)
+              a
+              (recur (inc a))))))
   
   ;; MISSING: Bounded polymorphism
   ;; MISSING: Destructuring
@@ -380,23 +388,6 @@
   ;; MISSING: Scope handling (public vs private)
   ;; MISSING: Pre-inference annotating.
 
-  
-  (run '(fn _ [f x]
-          (f x)))
-
-  
-
-  ;; #system.type.Types{:db {java.lang.Object [:system.type/object java.lang.Object []], java.lang.Short [:system.type/object java.lang.Short []], java.lang.Integer [:system.type/object java.lang.Integer []], java.lang.Exception [:system.type/object java.lang.Exception []], clojure.lang.Var [:system.type/all {} [x] [:system.type/object clojure.lang.Var [x]]], java.lang.Double [:system.type/object java.lang.Double []], java.lang.Boolean [:system.type/object java.lang.Boolean []], java.lang.String [:system.type/object java.lang.String []], java.lang.Long [:system.type/object java.lang.Long []], java.lang.Byte [:system.type/object java.lang.Byte []], java.lang.Number [:system.type/object java.lang.Number []]},
-  ;;                    :heap #system.type.TypeHeap{:counter 5,
-  ;;                                                :mappings {4 nil,
-  ;;                                                           3 [:system.type/nothing],
-  ;;                                                           2 [:system.type/interval [:system.type/var 3] [:system.type/nothing]],
-  ;;                                                           1 [:system.type/interval [:system.type/function ([:system.type/arity ([:system.type/var 3]) [:system.type/var 4]])] [:system.type/nothing]],
-  ;;                                                           0 [:system.type/interval [:system.type/any] [:system.type/nothing]]}},
-  ;;                    :class-hierarchy {:parents {java::class/java.lang.Number #{java::class/java.lang.Object}, java::class/java.lang.Long #{java::class/java.lang.Number}, java::class/java.lang.Byte #{java::class/java.lang.Number}, java::class/java.lang.Integer #{java::class/java.lang.Number}, java::class/java.lang.Boolean #{java::class/java.lang.Object}, java::class/java.lang.Short #{java::class/java.lang.Number}, java::class/java.lang.Exception #{java::class/java.lang.Object}, java::class/java.lang.String #{java::class/java.lang.Object}, java::class/java.lang.Double #{java::class/java.lang.Number}, java::class/clojure.lang.Var #{java::class/java.lang.Object}}, :ancestors {java::class/java.lang.Number #{java::class/java.lang.Object}, java::class/java.lang.Long #{java::class/java.lang.Number java::class/java.lang.Object}, java::class/java.lang.Byte #{java::class/java.lang.Number java::class/java.lang.Object}, java::class/java.lang.Integer #{java::class/java.lang.Number java::class/java.lang.Object}, java::class/java.lang.Boolean #{java::class/java.lang.Object}, java::class/java.lang.Short #{java::class/java.lang.Number java::class/java.lang.Object}, java::class/java.lang.Exception #{java::class/java.lang.Object}, java::class/java.lang.String #{java::class/java.lang.Object}, java::class/java.lang.Double #{java::class/java.lang.Number java::class/java.lang.Object}, java::class/clojure.lang.Var #{java::class/java.lang.Object}}, :descendants {java::class/java.lang.Number #{java::class/java.lang.Long java::class/java.lang.Byte java::class/java.lang.Integer java::class/java.lang.Short java::class/java.lang.Double}, java::class/java.lang.Object #{java::class/java.lang.Number java::class/java.lang.Long java::class/java.lang.Byte java::class/java.lang.Integer java::class/java.lang.Boolean java::class/java.lang.Short java::class/java.lang.Exception java::class/java.lang.String java::class/java.lang.Double java::class/clojure.lang.Var}}},
-  ;;                    :casts {java.lang.Object {}, java.lang.Short {java.lang.Number [:system.type/all {} [] [:system.type/object java.lang.Number []]]}, java.lang.Integer {java.lang.Number [:system.type/all {} [] [:system.type/object java.lang.Number []]]}, java.lang.Exception {java.lang.Object [:system.type/all {} [] [:system.type/object java.lang.Object []]]}, clojure.lang.Var {java.lang.Object [:system.type/all {} [x] [:system.type/object java.lang.Object []]]}, java.lang.Double {java.lang.Number [:system.type/all {} [] [:system.type/object java.lang.Number []]]}, java.lang.Boolean {java.lang.Object [:system.type/all {} [] [:system.type/object java.lang.Object []]]}, java.lang.String {java.lang.Object [:system.type/all {} [] [:system.type/object java.lang.Object []]]}, java.lang.Long {java.lang.Number [:system.type/all {} [] [:system.type/object java.lang.Number []]]}, java.lang.Byte {java.lang.Number [:system.type/all {} [] [:system.type/object java.lang.Number []]]}, java.lang.Number {java.lang.Object [:system.type/all {} [] [:system.type/object java.lang.Object []]]}},
-  ;;                    :members {[decode :static-methods] {java.lang.Long [:system.type/function ([:system.type/arity ([:system.type/object java.lang.String []]) [:system.type/object java.lang.Long []]])]}, [doubleValue :methods] {java.lang.Long [:system.type/function ([:system.type/arity [[:system.type/object java.lang.Long []]] [:system.type/function ([:system.type/arity () [:system.type/object java.lang.Double []]])]])]}, [value :fields] {java.lang.Long [:system.type/function ([:system.type/arity [[:system.type/object java.lang.Long []]] [:system.type/object java.lang.Long []]])]}, [MAX_VALUE :static-fields] {java.lang.Long [:system.type/object java.lang.Long []]}, [java.lang.Long :ctor] {java.lang.Long [:system.type/function ([:system.type/arity ([:system.type/object java.lang.String []]) [:system.type/object java.lang.Long []]])]}}}
-  
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
   (run '(do (ann get-object [-> java.lang.Object])
@@ -414,30 +405,17 @@
           (fn foo []
             (use-case (get-object)))))
 
-  [[Any -> Any] Any -> Any]
-  [(All [a b] [a -> b]) Any -> Any]
-  (run '(fn _ [f x]
-          (f x)))
-
-  ;; Right one:
-  (All [a b] [[a -> b] a -> b])
-
-
-  (run '(do (defalias IntOrString (Or java.lang.Integer java.lang.String))
-          (ann yolo IntOrString)
-          yolo))
-
   (run '(do (ann-class (java.lang.List x) [java.lang.Object])
           (defalias (RecTest x) (Or x (java.lang.List (RecTest x))))
           (ann yolo (RecTest java.lang.Integer))
           yolo
           ))
 
-  ;; TODO: Finish loop inference.
   ;; TODO: Finish refining.
+  ;; TODO: Instantiate poly fns, fn-call them, then ground all bound type-vars and transform unbound type-vars into holes.
+  ;; TODO: Use a polymorphic dispatch-fn on 'if's when ::&parser/symbol must be refined: (Fn [Truthy -> true] [Falsey -> false] [Ambiguous -> Boolean]), where Ambiguous = (And (Not Truthy) (Not Falsey))
   ;; TODO: 
-
-  
+  ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
   (run '(do (ann inc [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer])
@@ -451,14 +429,6 @@
           (ann map? (Fn [(java.lang.Map Any Any) -> true]
                         [(Not (java.lang.Map Any Any)) -> false]))
           (fn foo [x]
-            (assert (map? x) "YOLO")
-            x)
-          ))
-
-  (run '(do (ann-class (java.lang.Map key val) [java.lang.Object])
-          (ann map? (Fn [(java.lang.Map Any Any) -> true]
-                        [(Not (java.lang.Map Any Any)) -> false]))
-          (fn foo [x]
             (if (map? x)
               x
               "YOLO"))
@@ -467,8 +437,6 @@
   
   
   ;; Refactorings to do:
-  ;; ::expr instead of ::bound to signal a type that has been calculated by the type-checker.
-  ;; Eliminate ::bound & ::var.
   ;; Improve type updating mechanism in recur and allow recur to work with fn.
   ;; Fix issue with refining.
   

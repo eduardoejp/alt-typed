@@ -24,6 +24,10 @@
 ;; Constants
 (def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
 (def +truthy+ [::complement +falsey+])
+(def +ambiguous+ [::intersection (list [::complement +truthy+] [::complement +falsey+])])
+(def +if-pred+ [::function (list [::arity (list +truthy+) [::literal 'java.lang.Boolean true]]
+                                 [::arity (list +falsey+) [::literal 'java.lang.Boolean false]]
+                                 [::arity (list +ambiguous+) [::object 'java.lang.Boolean []]])])
 
 (def +init+ (Types. {} (TypeHeap. 0 {}) (make-hierarchy) {} {}))
 
@@ -65,14 +69,12 @@
         (list [(assoc-in state [:heap :mappings ?id] [::interval top bottom]) nil])))))
 
 (defn redirect-hole [from to]
-  (prn 'redirect-hole from to)
   (match [from to]
     [[::hole ?id] [::hole _]]
     (fn [state]
       (list [(assoc-in state [:heap :mappings ?id] to) nil]))))
 
 (defn normalize-hole [hole]
-  (prn 'normalize-hole hole)
   (match hole
     [::hole ?id]
     (fn [^Types state]
@@ -313,8 +315,7 @@
   (prn 'solve expected actual)
   (match [expected actual]
     [[::var _] _]
-    (exec [? (bound-var? expected)
-           :let [_ (prn '[::var _] expected ? actual)]]
+    (exec [? (bound-var? expected)]
       (if ?
         (exec [=type (deref-var expected)]
           (solve =type actual))
@@ -344,7 +345,8 @@
       (&util/parallel [(solve expected =top)
                        (exec [_ (solve =top expected)
                               _ (solve expected =bottom)
-                              _ (narrow-hole actual expected =bottom)]
+                              =new-top ($and [expected =top])
+                              _ (narrow-hole actual =new-top =bottom)]
                          (return true))]))
 
     [_ [::ref _]]

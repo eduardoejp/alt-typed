@@ -60,6 +60,37 @@
     :else
     (return type)))
 
+(defn ^:private clean-holes [to-clean type]
+  (prn 'clean-holes to-clean type)
+  (match type
+    [::&type/hole _]
+    (if (contains? to-clean type)
+      (exec [=type (&util/with-field :types
+                     (&type/get-hole type))
+             :let [=type (match =type
+                           [::&type/interval ?top ?bottom]
+                           (if (= [::&type/any] ?top)
+                             ?bottom
+                             ?top))]]
+        (clean-holes to-clean =type))
+      (return type))
+    
+    [::&type/object ?class ?params]
+    (exec [=params (map-m (partial clean-holes to-clean) ?params)]
+      (return [::&type/object ?class =params]))
+
+    [::&type/union ?types]
+    (exec [=types (map-m (partial clean-holes to-clean) ?types)]
+      (&util/with-field :types
+        (&type/$or (vec =types))))
+
+    [::&type/complement ?type]
+    (exec [=type (clean-holes to-clean ?type)]
+      (return [::&type/complement =type]))
+    
+    :else
+    (return type)))
+
 (defn with-env [env inner]
   (exec [:let [bound-ids (-> env vals set)]
          _ (&util/with-field :env
@@ -71,31 +102,23 @@
     (return =type)))
 
 (defn ^:private extract-holes [type]
-  (prn 'extract-holes type)
   (match type
     [::&type/hole _]
-    (exec [:let [_ (prn '=hole/original type)]
-           =hole (&util/with-field :types
+    (exec [=hole (&util/with-field :types
                    (&type/normalize-hole type))
-           :let [_ (prn '=hole/normal =hole)]
            =interval (&util/with-field :types
                        (&type/get-hole =hole))
            :let [[=top =bottom] (match =interval
                                   [::&type/interval =top =bottom]
                                   [=top =bottom])]
            at-top (extract-holes =top)
-           :let [_ (prn 'at-top at-top)]
            at-bottom (extract-holes =bottom)
-           :let [_ (prn 'at-bottom at-bottom)]
-           :let [total-count (merge-with + {=hole 1} at-top at-bottom)]
-           :let [_ (prn 'total-count total-count)]]
+           :let [total-count (merge-with + {=hole 1} at-top at-bottom)]]
       (return total-count))
     
     [::&type/ref _]
     (exec [=type (&util/with-field :types
-                   (&type/get-ref type))
-           ;; :let [_ (prn '=type =type)]
-           ]
+                   (&type/get-ref type))]
       (extract-holes =type))
     
     ;; [::&type/var _]
@@ -113,21 +136,18 @@
     (extract-holes ?type)
 
     [::&type/function ?arities]
-    (exec [all-holes (map-m extract-holes ?arities)
-           :let [_ (prn 'function/all-holes all-holes)]]
+    (exec [all-holes (map-m extract-holes ?arities)]
       (return (apply merge-with + all-holes)))
 
     [::&type/arity ?args ?return]
     (exec [all-holes (map-m extract-holes ?args)
-           return-holes (extract-holes ?return)
-           :let [_ (prn 'arity/all-holes return-holes all-holes)]]
+           return-holes (extract-holes ?return)]
       (return (apply merge-with + return-holes all-holes)))
     
     :else
     (return {})))
 
 (defn ^:private prettify-type [mappings type]
-  (prn 'prettify-type mappings type)
   (match type
     [::&type/hole _]
     (if-let [var-name (get mappings type)]
@@ -151,8 +171,7 @@
     
     [::&type/ref _]
     (exec [=type (&util/with-field :types
-                   (&type/get-ref type))
-           :let [_ (prn '=type =type)]]
+                   (&type/get-ref type))]
       (prettify-type mappings =type))
 
     [::&type/var _]
@@ -161,7 +180,6 @@
                            ;; _ (fn [state]
                            ;;     (prn '(:types state) (:types state))
                            ;;     (list [state nil]))
-                           :let [_ (prn 'prettify-type '[::&type/var _] =type)]
                            =type* (prettify-type mappings =type)
                            _ (&util/with-field :types
                                (&type/rebind-var type =type*))]
@@ -211,12 +229,10 @@
     (return type)))
 
 (defn ->pretty [type]
-  (prn '->pretty type)
   (match type
     [::&type/ref _]
     (exec [=type (&util/with-field :types
-                   (&type/get-ref type))
-           :let [_ (prn '=type =type)]]
+                   (&type/get-ref type))]
       (->pretty =type))
 
     [::&type/var _]
@@ -272,34 +288,18 @@
     (match arity
       [::&type/arity ?args ?body]
       (exec [body-vars (extract-holes ?body)
-             :let [_ (prn 'body-vars body-vars)]
-             args-vars (exec [all-holes (map-m extract-holes ?args)
-                              :let [_ (prn 'args-vars/all-holes all-holes)]]
+             args-vars (exec [all-holes (map-m extract-holes ?args)]
                          (return (apply merge-with + all-holes)))
-             :let [_ (prn 'args-vars args-vars)]
              :let [poly-vars (merge-with + args-vars body-vars)
-                   _ (prn 'poly-vars poly-vars)
                    poly-vars (sort < (for [[k cnt] poly-vars
                                            :when (> cnt 1)]
                                        (nth k 1)))
-                   _ (prn 'poly-vars poly-vars)
                    used-vars (take (count poly-vars) +var-names+)
-                   _ (prn 'used-vars used-vars)
                    mappings (into {} (map (fn [id name]
                                             [[::&type/hole id] name])
                                           poly-vars used-vars))
-                   _ (prn 'mappings mappings)
-                   rev-mappings (set/map-invert mappings)
-                   _ (prn 'rev-mappings rev-mappings)]
-             :let [_ (prn 'generalize-arity/arity arity)]
-             _ (fn [state]
-                 (prn '(get-in state [:types :heap]) (get-in state [:types :heap]))
-                 (list [state nil]))
-             arity* (prettify-type mappings arity)
-             :let [_ (prn 'generalize-arity/arity* arity*)]
-             _ (fn [state]
-                 (prn '(get-in state [:types :heap]) (get-in state [:types :heap]))
-                 (list [state nil]))]
+                   rev-mappings (set/map-invert mappings)]
+             arity* (prettify-type mappings arity)]
         (if (empty? used-vars)
           (return arity*)
           (exec [user-vars* (map-m (fn [uv]
@@ -310,7 +310,7 @@
                                                                    [=top =bottom])]]
                                        (return (if (= [::&type/any] =top)
                                                  uv
-                                                 [uv :< =top]))))
+                                                 [uv '< =top]))))
                                    used-vars)]
             (return [::&type/all {} (vec user-vars*) arity*])))
         ))))
@@ -338,7 +338,6 @@
       )))
 
 (defn ^:private refine-local [types local type]
-  (prn 'refine-local local type)
   (match type
     [::&type/union ?types]
     (exec [=type (return-all ?types)
@@ -346,7 +345,6 @@
                                     (&util/with-field :types
                                       (&type/solve expected =type)))
                                   types))
-           :let [_ (prn "Setting" local "to" =type)]
            _ (&util/with-field :types
                (&type/set-ref local =type))]
       (return nil))
@@ -363,7 +361,6 @@
     ))
 
 (defn ^:private refine [check* types =form]
-  (prn 'refine =form types)
   (exec [_ (match =form
              [::&type/ref _]
              (exec [=type (&util/with-field :types
@@ -376,14 +373,12 @@
     (return =form)))
 
 (defn ^:private check-arity [=arity =args]
-  (prn 'check-arity =arity =args)
   (match =arity
     [::&type/arity ?args ?return]
-    (exec [_ (map-m
-              (fn [[arg input]]
-                (&util/with-field :types
-                  (&type/solve arg input)))
-              (map vector ?args =args))]
+    (exec [_ (map-m (fn [[arg input]]
+                      (&util/with-field :types
+                        (&type/solve arg input)))
+                    (map vector ?args =args))]
       (return ?return))))
 
 (defn ^:private fn-call [=fn =args]
@@ -392,16 +387,12 @@
                (exec [=fn (&type/instantiate =fn)]
                  (if (&type/type-fn? =fn)
                    (fn-call =fn =args)
-                   (&type/upcast ::&type/$fn =fn))))
-         :let [_ (prn 'fn-call '=fn =fn)]
-         ]
+                   (&type/upcast ::&type/$fn =fn))))]
     (match =fn
       [::&type/function ?arities]
       (exec [=arity (return-all (for [[_ args _ :as arity] ?arities
                                       :when (= (count args) (count =args))]
-                                  arity))
-             :let [_ (prn 'fn-call '=arity =arity)]
-             ]
+                                  arity))]
         (check-arity =arity =args)))))
 
 (defrecord ClassTypeCtor [class args])
@@ -528,9 +519,7 @@
 
     [::&parser/if ?test ?then ?else]
     (exec [=test (check* ?test)
-           :let [_ (prn ::&parser/if '=test =test)]
-           =test (refine check* [&type/+truthy+ &type/+falsey+ [::&type/any]] =test)
-           :let [_ (prn ::&parser/if '=test =test)]]
+           =test (refine check* [&type/+truthy+ &type/+falsey+ [::&type/any]] =test)]
       (&util/try-all [(exec [_ (&util/with-field :types
                                  (&type/solve &type/+truthy+ =test))
                              =then (check* ?then)]
@@ -571,51 +560,30 @@
                         main-branches)))
 
     [::&parser/loop ?locals ?body]
-    (exec [=locals (map-m
-                    (fn [[label value]]
-                      (exec [=value (&util/with-field :env
-                                      (&env/resolve value))]
-                        (return [label =value])))
-                    ?locals)
-           locals-pre (map-m
-                       #(exec [=bound (&util/with-field :env
-                                        (&env/resolve %))]
-                          (&util/with-field :types
-                            (&type/get-ref =bound)))
-                       (mapv first =locals))
-           _ (with-env (into {::recur (mapv first =locals)}
-                             =locals)
-               (check* ?body))
-           locals-post (map-m
-                        #(exec [=bound (&util/with-field :env
-                                         (&env/resolve %))]
-                           (&util/with-field :types
-                             (&type/get-ref =bound)))
-                        (mapv first =locals))]
-      (with-env (into {::recur (mapv first =locals)}
-                      =locals)
-        (check* ?body)))
+    (exec [=locals (map-m (fn [[label value]]
+                            (exec [=value (&util/with-field :env
+                                            (&env/resolve value))
+                                   =value (&util/with-field :types
+                                            (&type/get-ref =value))
+                                   =hole (&util/with-field :types
+                                           (exec [=hole &type/fresh-hole
+                                                  _ (&type/narrow-hole =hole [::&type/any] =value)]
+                                             (return =hole)))]
+                              (return [label =hole])))
+                          ?locals)
+           =body (with-env (into {::recur (mapv second =locals)}
+                                 =locals)
+                   (check* ?body))]
+      (clean-holes (into #{} (map second =locals)) =body))
 
     [::&parser/recur ?args]
     (exec [=recur (&util/with-field :env
                     (&env/resolve ::recur))
-           =recur (map-m
-                   #(&util/with-field :env
-                      (&env/resolve %))
-                   =recur)
-           _ (if (= (count =recur) (count ?args))
-               (return nil)
-               zero)
+           :when (= (count =recur) (count ?args))
            =args (map-m check* ?args)
-           _ (map-m
-              (fn [[=e =a]]
-                (exec [=wider (&util/with-field :types
-                                (exec [_ (&type/solve =a =e)
-                                       =e (&type/get-ref =e)]
-                                  (&type/$or [=e =a])))]
-                  (&util/with-field :types
-                    (&type/set-ref =e =wider))))
-              (map vector =recur =args))]
+           _ (&util/with-field :types
+               (map-m (fn [[=e =a]] (&type/solve =a =e))
+                      (map vector =recur =args)))]
       (return [::&type/nothing]))
 
     [::&parser/assert ?test ?message]
@@ -801,26 +769,17 @@
                        zero)]
         (fn-call =method =args))
       (exec [=fn (check* ?fn)
-             :let [_ (prn '=fn =fn)]
              =args (map-m check* ?args)
-             :let [_ (prn '=args =args)]
              =fn (match =fn
                    [::&type/hole _]
                    (&util/with-field :types
-                     (exec [=fn* (&type/get-hole =fn)
-                            :let [_ (prn '=fn* =fn*)]
-                            =fn-type (fresh-poly-fn (count =args))
-                            :let [_ (prn '=fn-type =fn-type)]
-                            ;; =fn-type (&type/instantiate =fn-type)
-                            ;; :let [_ (prn '=fn-type =fn-type)]
+                     (exec [=fn-type (fresh-poly-fn (count =args))
                             _ (&type/solve =fn-type =fn)]
                        (return =fn-type)))
                    
                    :else
                    (return =fn))
-             :let [_ (prn '=fn =fn)]
-             =return (fn-call =fn =args)
-             :let [_ (prn '=return =return)]]
+             =return (fn-call =fn =args)]
         (return =return)))
     ))
 
