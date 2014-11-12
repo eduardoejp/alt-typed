@@ -337,41 +337,6 @@
           (concat batch ((merge-arities left) state))))
       )))
 
-(defn ^:private refine-local [types local type]
-  (match type
-    [::&type/union ?types]
-    (exec [=type (return-all ?types)
-           _ (&util/try-all (mapv (fn [expected]
-                                    (&util/with-field :types
-                                      (&type/solve expected =type)))
-                                  types))
-           _ (&util/with-field :types
-               (&type/set-ref local =type))]
-      (return nil))
-    
-    [::&type/object 'java.lang.Boolean []]
-    (exec [=type (return-all (list [::&type/literal java.lang.Boolean true]
-                                   [::&type/literal java.lang.Boolean false]))
-           _ (&util/with-field :types
-               (&type/set-ref local =type))]
-      (return nil))
-    
-    :else
-    (return type)
-    ))
-
-(defn ^:private refine [check* types =form]
-  (exec [_ (match =form
-             [::&type/ref _]
-             (exec [=type (&util/with-field :types
-                            (&type/get-ref =form))
-                    _ (refine-local types =form =type)]
-               (return true))
-
-             :else
-             (return true))]
-    (return =form)))
-
 (defn ^:private check-arity [=arity =args]
   (match =arity
     [::&type/arity ?args ?return]
@@ -518,18 +483,22 @@
           (check* [::&parser/let ?bindings ?body]))))
 
     [::&parser/if ?test ?then ?else]
-    (exec [=test (check* ?test)
-           =test (refine check* [&type/+truthy+ &type/+falsey+ [::&type/any]] =test)]
+    (exec [=dispatch-type (match ?test
+                            [::&parser/symbol]
+                            (exec [=test (check* ?test)]
+                              (fn-call &type/+if-pred+ (list =test)))
+
+                            :else
+                            (check* ?test))
+           :let [_ (prn '=dispatch-type =dispatch-type)]]
       (&util/try-all [(exec [_ (&util/with-field :types
-                                 (&type/solve &type/+truthy+ =test))
-                             =then (check* ?then)]
-                        (return =then))
+                                 (&type/solve &type/+truthy+ =dispatch-type))]
+                        (check* ?then))
                       (exec [_ (&util/with-field :types
-                                 (&type/solve &type/+falsey+ =test))
-                             =else (check* ?else)]
-                        (return =else))
+                                 (&type/solve &type/+falsey+ =dispatch-type))]
+                        (check* ?else))
                       (exec [_ (&util/with-field :types
-                                 (&type/solve [::&type/any] =test))
+                                 (&type/solve [::&type/any] =dispatch-type))
                              =then (check* ?then)
                              =else (check* ?else)]
                         (&util/with-field :types
@@ -547,7 +516,6 @@
                            (return [=test ?form])))
                        ?clauses)
            =value (check* ?value)
-           =value (refine check* (mapv first =branches*) =value)
            :let [main-branches (mapv (fn [[=test ?form]]
                                        (exec [_ (&util/with-field :types
                                                   (&type/solve =test =value))

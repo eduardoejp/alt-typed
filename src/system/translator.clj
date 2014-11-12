@@ -26,6 +26,9 @@
     
     [::&type/union ?types]
     `(~'Or ~@(map type->code ?types))
+
+    [::&type/intersection ?types]
+    `(~'And ~@(map type->code ?types))
     
     [::&type/complement ?tyoe]
     `(~'Not ~(type->code ?tyoe))

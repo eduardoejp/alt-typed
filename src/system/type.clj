@@ -350,8 +350,13 @@
                          (return true))]))
 
     [_ [::ref _]]
-    (exec [=type (get-ref actual)]
-      (solve expected =type))
+    (exec [=type (get-ref actual)
+           :let [_ (prn "Current type:" =type)]
+           :let [_ (prn "ANDing" expected =type)]
+           =new-type ($and [expected =type])
+           :let [_ (prn "New type:" =new-type)]
+           _ (set-ref actual =new-type)]
+      (return true))
 
     ;; [[::var ?e-id] [::var ?a-id]]
     ;; (if (= ?e-id ?a-id)
@@ -397,11 +402,20 @@
     [[::any] _]
     (return true)
 
+    [_ [::any]]
+    zero
+
     [_ [::nothing]]
     (return true)
 
+    [[::nothing] _]
+    zero
+
     [[::nil] [::nil]]
     (return true)
+
+    [[::nil] _]
+    zero
 
     [[::literal ?e-class ?e-value] [::literal ?a-class ?a-value]]
     (if (and (= ?e-class ?a-class)
@@ -590,8 +604,63 @@
         )))
 
   $or  ::union        base     addition :parent :child
-  $and ::intersection addition base     :child  :parent
+  ;; $and ::intersection addition base     :child  :parent
   )
+
+(letfn [(adder [base addition]
+          (match [base addition]
+            [_ [::union ?addition]]
+            (reduce-m (fn [=filter =refinement]
+                        (&util/try-all [(exec [_ (solve =filter =refinement)]
+                                          (return =refinement))
+                                        (exec [_ (solve =refinement =filter)]
+                                          (return =filter))
+                                        (exec [_ (return nil)]
+                                          (adder =filter =refinement))]))
+                      base
+                      ?addition)
+
+            [_ [::intersection ?addition]]
+            (reduce-m adder base ?addition)
+            
+            [[::intersection ?base] _]
+            (exec [veredicts (map-m (fn [=base]
+                                      (&util/try-all [(exec [_ (solve =base addition)]
+                                                        (return :child))
+                                                      (exec [_ (solve addition =base)]
+                                                        (return :parent))
+                                                      (return :peer)]))
+                                    ?base)]
+              (cond (some (partial = :parent) veredicts)
+                    (return base)
+
+                    (every? (partial = :peer) veredicts)
+                    (return [::intersection (conj ?base addition)])
+
+                    :else
+                    (if-let [rem-types (->> (map vector ?base veredicts)
+                                            (filter (comp (partial not= :child) second))
+                                            (map first)
+                                            seq)]
+                      (return [::intersection (conj (vec rem-types) addition)])
+                      (return addition))))
+            
+            [_ _]
+            (&util/try-all [(exec [_ (solve base addition)]
+                              (return addition))
+                            (exec [_ (solve addition base)]
+                              (return base))
+                            (return [::intersection [base addition]])])
+            ))]
+  (defn $and [types]
+    (prn '$and types)
+    (match (vec types)
+      []
+      zero
+      
+      [type & others]
+      (reduce-m adder type others)
+      )))
 
 (let [adder (fn [t1 t2]
               (match [t1 t2]
@@ -617,28 +686,28 @@
       [?init & ?others]
       (reduce-m adder ?init ?others))))
 
-(let [adder (fn [t1 t2]
-              (match [t1 t2]
-                [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
-                (exec [=data ($or [?data-1 ?data-2])
-                       =effs (map-m
-                              (fn [key]
-                                (exec [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
-                                  (return [key =merged])))
-                              (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
-                  (return [::eff =data =effs]))
-                
-                [[::eff ?data-1 ?effs-1] _]
-                (exec [=data ($or [?data-1 t2])]
-                  (return [::eff =data ?effs-1]))
-                
-                [_ [::eff ?data-2 ?effs-2]]
-                (exec [=data ($or [t1 ?data-2])]
-                  (return [::eff =data ?effs-2]))
-                
-                [_ _]
-                ($or [t1 t2])
-                ))]
+(letfn [(adder [t1 t2]
+          (match [t1 t2]
+            [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
+            (exec [=data ($or [?data-1 ?data-2])
+                   =effs (map-m
+                          (fn [key]
+                            (exec [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
+                              (return [key =merged])))
+                          (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
+              (return [::eff =data =effs]))
+            
+            [[::eff ?data-1 ?effs-1] _]
+            (exec [=data ($or [?data-1 t2])]
+              (return [::eff =data ?effs-1]))
+            
+            [_ [::eff ?data-2 ?effs-2]]
+            (exec [=data ($or [t1 ?data-2])]
+              (return [::eff =data ?effs-2]))
+            
+            [_ _]
+            ($or [t1 t2])
+            ))]
   (defn parallel-combine-types [types]
     (match (vec types)
       []

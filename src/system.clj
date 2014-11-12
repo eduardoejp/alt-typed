@@ -368,13 +368,19 @@
               (f x))
             )))
 
-  
+  (run '(do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
+          (let [result (parse-int "1234")]
+            (if result
+              result
+              "YOLO"))))
 
   (run '(do (ann inc [java.lang.Long -> java.lang.Long])
           (loop [a 0]
             (if (= 10 a)
               a
               (recur (inc a))))))
+
+
   
   ;; MISSING: Bounded polymorphism
   ;; MISSING: Destructuring
@@ -414,7 +420,7 @@
   ;; TODO: Finish refining.
   ;; TODO: Instantiate poly fns, fn-call them, then ground all bound type-vars and transform unbound type-vars into holes.
   ;; TODO: Use a polymorphic dispatch-fn on 'if's when ::&parser/symbol must be refined: (Fn [Truthy -> true] [Falsey -> false] [Ambiguous -> Boolean]), where Ambiguous = (And (Not Truthy) (Not Falsey))
-  ;; TODO: 
+  ;; TODO: Handle let-aliasing.
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
