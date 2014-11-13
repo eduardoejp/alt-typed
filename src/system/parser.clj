@@ -166,9 +166,23 @@
     (exec [=arities (map-m (partial parse-arity (partial parse-type-def local-syms)) ?arities)]
       (return [::&types/function =arities]))
 
-    (['All (?params :guard (every-pred vector? (partial every? symbol?))) ?def] :seq)
-    (exec [*def (parse-type-def (into local-syms (for [p ?params] [p :var])) ?def)]
-      (return [::&types/all {} ?params *def]))
+    (['All ?params ?def] :seq)
+    (exec [*params (map-m #(match %
+                             (?open :guard symbol?)
+                             (return ?open)
+                             
+                             [?bounded '< ?top]
+                             (exec [=top (parse-type-def local-syms ?top)]
+                               (return [?bounded '< =top])))
+                          ?params)
+           *def (parse-type-def (into local-syms (for [p ?params]
+                                                   (match p
+                                                     (?open :guard symbol?)
+                                                     [?open :var]
+                                                     [?bounded '< ?top]
+                                                     [?bounded :var])))
+                                ?def)]
+      (return [::&types/all {} *params *def]))
 
     ([?fn & ?params] :seq)
     (exec [=type-fn (parse-type-def local-syms ?fn)

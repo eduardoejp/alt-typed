@@ -35,19 +35,6 @@
                    (&type/narrow-hole type =top =bottom))]
           (return type))))
     
-    ;; [::&type/var _]
-    ;; (exec
-    ;;   [=interval (&util/with-field :types
-    ;;                (&type/deref-var type))
-    ;;    :let [[=top =bottom] (match =interval
-    ;;                           [::&type/interval =top =bottom]
-    ;;                           [=top =bottom])]
-    ;;    =top (clean-env to-clean =top)
-    ;;    =bottom (clean-env to-clean =bottom)
-    ;;    _ (&util/with-field :types
-    ;;        (&type/update-var type [::&type/interval =top =bottom]))]
-    ;;   (return type))
-
     [::&type/object ?class ?params]
     (exec [=params (map-m (partial clean-env to-clean) ?params)]
       (return [::&type/object ?class =params]))
@@ -63,35 +50,6 @@
     
     :else
     (return type)))
-
-;; (defn ^:private clean-holes [to-clean type]
-;;   ;; (prn 'clean-holes to-clean type)
-;;   (match type
-;;     [::&type/hole _]
-;;     (if (contains? to-clean type)
-;;       (exec [[?top ?bottom] (&util/with-field :types
-;;                               (&type/get-hole type))
-;;              :let [=type (if (= [::&type/any] ?top)
-;;                            ?bottom
-;;                            ?top)]]
-;;         (clean-holes to-clean =type))
-;;       (return type))
-    
-;;     [::&type/object ?class ?params]
-;;     (exec [=params (map-m (partial clean-holes to-clean) ?params)]
-;;       (return [::&type/object ?class =params]))
-
-;;     [::&type/union ?types]
-;;     (exec [=types (map-m (partial clean-holes to-clean) ?types)]
-;;       (&util/with-field :types
-;;         (reduce-m &type/$or [::&type/nothing] =types)))
-
-;;     [::&type/complement ?type]
-;;     (exec [=type (clean-holes to-clean ?type)]
-;;       (return [::&type/complement =type]))
-    
-;;     :else
-;;     (return type)))
 
 (defn with-env [env inner]
   (exec [:let [bound-ids (-> env vals set)]
@@ -169,35 +127,6 @@
             ;; (return type)
             (prettify-type mappings =top)))))
     
-    [::&type/var _]
-    (&util/try-all [(exec [=type (&util/with-field :types
-                                   (&type/deref-var type))
-                           ;; _ (fn [state]
-                           ;;     (prn '(:types state) (:types state))
-                           ;;     (list [state nil]))
-                           =type* (prettify-type mappings =type)
-                           _ (&util/with-field :types
-                               (&type/rebind-var type =type*))]
-                      (return type))
-                    (return type)])
-    
-    ;; (&util/try-all [(exec [=type (&util/with-field :types
-    ;;                                (&type/deref-var type))
-    ;;                        :let [_ (prn 'prettify-type '[::&type/var _] =type)]]
-    ;;                   (prettify-type mappings =type))
-    ;;                 (return [::&type/any])])
-    
-    ;; [::&type/var _]
-    ;; (if-let [var-name (get mappings type)]
-    ;;   (return var-name)
-    ;;   (exec
-    ;;     [=interval (&util/with-field :types
-    ;;                  (&type/deref-var type))
-    ;;      :let [[=top =bottom] (match =interval
-    ;;                             [::&type/interval =top =bottom]
-    ;;                             [=top =bottom])]]
-    ;;     (prettify-type mappings =top)))
-
     [::&type/object ?class ?params]
     (exec [=params (map-m (partial prettify-type mappings) ?params)]
       (return [::&type/object ?class =params]))
@@ -223,43 +152,37 @@
     :else
     (return type)))
 
-(defn ->pretty [type]
+(defn ^:private ground-type [type]
   (match type
-    [::&type/var _]
-    (exec [=type (&util/with-field :types
-                   (&type/deref-var type))]
-      (->pretty =type))
+    [::&type/hole _]
+    (exec [[=top =bottom] (&util/with-field :types
+                            (&type/get-hole type))]
+      (if (and (= [::&type/any] =top)
+               (not= [::&type/nothing] =bottom))
+        (ground-type =bottom)
+        (ground-type =top)))
     
-    ;; [::&type/var _]
-    ;; (exec
-    ;;   [=interval (&util/with-field :types
-    ;;                (&type/deref-var type))
-    ;;    :let [[=top =bottom] (match =interval
-    ;;                           [::&type/interval =top =bottom]
-    ;;                           [=top =bottom])]]
-    ;;   (->pretty =top))
-
     [::&type/object ?class ?params]
-    (exec [=params (map-m ->pretty ?params)]
+    (exec [=params (map-m ground-type ?params)]
       (return [::&type/object ?class =params]))
 
     [::&type/union ?types]
-    (exec [=types (map-m ->pretty ?types)]
+    (exec [=types (map-m ground-type ?types)]
       (&util/with-field :types
         (reduce-m &type/$or [::&type/nothing] =types)))
 
     [::&type/complement ?type]
-    (exec [=type (->pretty ?type)]
+    (exec [=type (ground-type ?type)]
       (return [::&type/complement =type]))
 
-    [::&type/arity ?args ?body]
-    (exec [=args (map-m ->pretty ?args)
-           =body (->pretty ?body)]
-      (return [::&type/arity =args =body]))
-
     [::&type/function ?arities]
-    (exec [=arities (map-m ->pretty ?arities)]
+    (exec [=arities (map-m ground-type ?arities)]
       (return [::&type/function =arities]))
+
+    [::&type/arity ?args ?body]
+    (exec [=args (map-m ground-type ?args)
+           =body (ground-type ?body)]
+      (return [::&type/arity =args =body]))
     
     :else
     (return type)))
@@ -763,9 +686,8 @@
 
 ;; Functions
 (defn check [form]
-  #(let [results ((exec [raw (check* form)]
-                    (->pretty raw))
-                  %)]
+  #(let [results ((exec [type (check* form)]
+                    (ground-type type)) %)]
      (if (empty? results)
        '()
        (do ;; (prn '(count results) (count results) (mapv second results))

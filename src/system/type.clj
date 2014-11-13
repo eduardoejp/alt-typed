@@ -88,54 +88,6 @@
           (list [state hole]))
         '()))))
 
-;; Monads / vars
-(def fresh-var
-  (fn [^Types state]
-    (let [id (-> state ^TypeHeap (.-heap) .-counter)]
-      (list [(update-in state [:heap]
-                        #(-> %
-                             (update-in [:counter] inc)
-                             (assoc-in [:mappings id] nil)))
-             [::var id]]))))
-
-(defn bind-var [type-var type]
-  (match type-var
-    [::var ?id]
-    (fn [^Types state]
-      (let [mappings (-> state ^TypeHeap (.-heap) .-mappings)]
-        (if (and (contains? mappings ?id)
-                 (nil? (get mappings ?id)))
-          (list [(assoc-in state [:heap :mappings ?id] type) nil])
-          '())))))
-
-(defn rebind-var [type-var type]
-  (match type-var
-    [::var ?id]
-    (fn [^Types state]
-      (let [mappings (-> state ^TypeHeap (.-heap) .-mappings)]
-        (if (and (contains? mappings ?id)
-                 (boolean (get mappings ?id)))
-          (list [(assoc-in state [:heap :mappings ?id] type) nil])
-          '())))))
-
-(defn bound-var? [type-var]
-  (match type-var
-    [::var ?id]
-    (fn [^Types state]
-      (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
-        (if (contains? mappings ?id)
-          (list [state (boolean (get mappings ?id))])
-          '())))))
-
-(defn deref-var [type-var]
-  (match type-var
-    [::var ?id]
-    (fn [^Types state]
-      (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
-        (if-let [=type (get mappings ?id)]
-          (list [state =type])
-          '())))))
-
 ;; Monads / DB
 (defn define-type [type-name type-def]
   (fn [^Types state]
@@ -287,73 +239,45 @@
     ))
 
 (defn solve [expected actual]
-  ;; (prn 'solve expected actual)
+  (prn 'solve expected actual)
   (match [expected actual]
-    [[::var _] _]
-    (exec [? (bound-var? expected)]
-      (if ?
-        (exec [=type (deref-var expected)]
-          (solve =type actual))
-        (bind-var expected actual)))
-
     [[::hole ?e-id] [::hole ?a-id]]
     (if (= ?e-id ?a-id)
       (return true)
-      (exec [[=top-e =bottom-e] (get-hole expected)
-             [=top-a =bottom-a] (get-hole actual)
-             _ (solve =top-e =top-a)
-             _ (solve =bottom-a =bottom-e)
+      (exec [[=top =bottom] (get-hole expected)
+             _ (solve =top actual)
+             _ (solve actual =bottom)
              _ (redirect-hole expected actual)]
         (return true)))
+    ;; (if (= ?e-id ?a-id)
+    ;;   (return true)
+    ;;   (exec [[=top-e =bottom-e] (get-hole expected)
+    ;;          :let [_ (prn 'expected =top-e =bottom-e)]
+    ;;          [=top-a =bottom-a] (get-hole actual)
+    ;;          :let [_ (prn 'actual =top-a =bottom-a)]
+    ;;          _ (solve =top-e =top-a)
+    ;;          :let [_ (println "Top fits!")]
+    ;;          _ (solve =bottom-a =bottom-e)
+    ;;          :let [_ (println "Bottom fits!")]
+    ;;          _ (redirect-hole expected actual)]
+    ;;     (return true)))
 
     [_ [::hole _]]
     (exec [[=top =bottom] (get-hole actual)
            =new-top ($and expected =top)
            ;; :let [_ (prn '=new-top =top expected =new-top)]
-           :when (not= [::nothing] =new-top)
+           ;; :when (not= [::nothing] =new-top)
+           _ (solve =new-top =bottom)
            _ (narrow-hole actual =new-top =bottom)]
       (return true))
 
-    ;; [[::var ?e-id] [::var ?a-id]]
-    ;; (if (= ?e-id ?a-id)
-    ;;   (return true)
-    ;;   (exec
-    ;;     [=interval-e (deref-var expected)
-    ;;      =interval-a (deref-var actual)
-    ;;      :let [[=top-e =bottom-e] (match =interval-e
-    ;;                                 [::interval =top =bottom]
-    ;;                                 [=top =bottom])
-    ;;            [=top-a =bottom-a] (match =interval-a
-    ;;                                 [::interval =top =bottom]
-    ;;                                 [=top =bottom])]
-    ;;      _ (solve =top-e =top-a)
-    ;;      _ (solve =bottom-a =bottom-e)
-    ;;      _ (update-var expected [::interval =top-a =bottom-a])]
-    ;;     (return true)))
-
-    ;; [[::var ?e-id] _]
-    ;; (exec
-    ;;   [=interval (deref-var expected)
-    ;;    :let [[=top =bottom] (match =interval
-    ;;                           [::interval =top =bottom]
-    ;;                           [=top =bottom])]
-    ;;    _ (solve =top actual)
-    ;;    _ (solve actual =bottom)
-    ;;    _ (update-var expected [::interval actual =bottom])]
-    ;;   (return true))
-    
-    ;; [_ [::var _]]
-    ;; (exec
-    ;;   [=interval (deref-var actual)
-    ;;    :let [[=top =bottom] (match =interval
-    ;;                           [::interval =top =bottom]
-    ;;                           [=top =bottom])]]
-    ;;   (&util/parallel [(solve expected =top)
-    ;;                    (exec
-    ;;                      [_ (solve =top expected)
-    ;;                       _ (solve expected =bottom)
-    ;;                       _ (update-var actual [::interval expected =bottom])]
-    ;;                      (return true))]))
+    [[::hole _] _]
+    (exec [[=top =bottom] (get-hole expected)
+           =new-bottom ($or actual =bottom)
+           ;; :let [_ (prn '=new-bottom =bottom actual =new-bottom)]
+           _ (solve =top =new-bottom)
+           _ (narrow-hole expected =top =new-bottom)]
+      (return true))
 
     [[::any] _]
     (return true)
@@ -413,13 +337,13 @@
         (return true))
       zero)
 
-    [_ [::union ?types]]
-    (exec [_ (map-m #(solve expected %) ?types)]
-      (return true))
-    
     [[::union ?types] _]
     (exec [=type (return-all ?types)
            _ (solve =type actual)]
+      (return true))
+
+    [_ [::union ?types]]
+    (exec [_ (map-m #(solve expected %) ?types)]
       (return true))
 
     [[::intersection ?filter] _]
@@ -476,13 +400,24 @@
     (return type)
     ))
 
+(defn prepare-params [params]
+  (map #(match %
+          (?open :guard symbol?)
+          ?open
+          [?bounded '< ?top]
+          ?bounded)
+       params))
+
 (defn apply [type-fn params]
+  (prn 'apply type-fn params)
   (match type-fn
     [::all ?env ?params ?type-def]
-    (if (= (count ?params) (count params))
-      (realize (into ?env (map vector ?params params))
-               ?type-def)
-      zero)
+    (do (prn `(~'= ~(count ?params) ~(count params))
+             (into ?env (map vector (prepare-params ?params) params)))
+      (if (= (count ?params) (count params))
+        (realize (into ?env (map vector (prepare-params ?params) params))
+                 ?type-def)
+        zero))
     
     :else
     zero))
@@ -490,7 +425,20 @@
 (defn instantiate [type]
   (match type
     [::all _ ?params _]
-    (exec [=params (map-m (constantly fresh-var) ?params)]
+    (exec [=params (map-m #(match %
+                             (?open :guard symbol?)
+                             fresh-hole
+                             
+                             [?bounded '< ?top]
+                             (exec [=hole fresh-hole
+                                    _ (narrow-hole =hole ?top [::nothing])]
+                               (return =hole)))
+                          ?params)
+           :let [_ (prn '=params =params)]
+           =params* (map-m #(exec [[=top _] (get-hole %)]
+                              (return =top))
+                           =params)
+           :let [_ (prn '=params* =params*)]]
       (apply type =params))
     
     :else

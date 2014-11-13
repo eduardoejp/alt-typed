@@ -409,13 +409,26 @@
               (if test
                 :else
                 (throw ex)))
+
+            ([java.lang.Exception -> :yolo])
+            (do (ann only-exs (All [[x < java.lang.Exception]] [x -> x]))
+              (fn _ [x]
+                (only-exs x)
+                :yolo))
+
+            ((All [[a < java.lang.Exception]] [a -> a]))
+            (do (ann only-exs (All [[x < java.lang.Exception]] [x -> x]))
+              (fn _ [x]
+                (only-exs x)))
             )))
 
+  (run '(do (ann only-exs (All [x] [x -> x]))
+          (fn _ [x]
+            (only-exs x))))
   
-
-  ;; MISSING: Bounded polymorphism
-  ;; MISSING: Destructuring
   ;; MISSING: Recursive types
+  ;; MISSING: Arrays and Xor types
+  ;; MISSING: Destructuring
   ;; MISSING: def(protocol|type|record), proxy & reify
   ;; MISSING: multimethods
   ;; MISSING: gen-class
@@ -424,8 +437,9 @@
   ;; MISSING: macro-expansion.
   ;; MISSING: Scope handling (public vs private)
   ;; MISSING: Pre-inference annotating.
-  ;; MISSING: Arrays and Xor types
   ;; MISSING: Solving functions
+  ;; MISSING: Error messages.
+  ;; MISSING: 
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
@@ -450,9 +464,8 @@
           yolo
           ))
 
-  ;; TODO: Instantiate poly fns, fn-call them, then ground all bound type-vars and transform unbound type-vars into holes.
-  ;; TODO: Handle let-aliasing.
   ;; TODO: Allow recur to work with fn.
+  ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
