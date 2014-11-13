@@ -366,14 +366,52 @@
             ((All [a b] [[a -> b] a -> b]))
             (fn _ [f x]
               (f x))
+
+            (java.lang.Long)
+            (do (ann inc [java.lang.Long -> java.lang.Long])
+              (ann = [Any Any -> java.lang.Boolean])
+              (loop [a 0]
+                (if (= 10 a)
+                  a
+                  (recur (inc a)))))
+
+            (java.lang.Long)
+            (do (ann inc [java.lang.Long -> java.lang.Long])
+              (ann = [Any Any -> java.lang.Boolean])
+              (loop [a 0]
+                (if (= 10 a)
+                  (recur (inc a))
+                  a)))
+
+            ((Eff Nothing {:try java.lang.Exception}))
+            (do (ann ex [-> java.lang.Exception])
+              (if true
+                (throw (ex))
+                :else))
+
+            (:else)
+            (do (ann ex [-> java.lang.Exception])
+              (if false
+                (throw (ex))
+                :else))
+
+            ((Eff :else {:try java.lang.Exception}))
+            (do (ann test java.lang.Boolean)
+              (ann ex java.lang.Exception)
+              (let [test* test]
+                (if test*
+                  (throw ex)
+                  :else)))
+
+            ((Eff :else {:try java.lang.Exception}))
+            (do (ann test java.lang.Boolean)
+              (ann ex java.lang.Exception)
+              (if test
+                :else
+                (throw ex)))
             )))
 
-  (run '(do (ann inc [java.lang.Long -> java.lang.Long])
-          (ann = [Any Any -> java.lang.Boolean])
-          (loop [a 0]
-            (if (= 10 a)
-              a
-              (recur (inc a))))))
+  
 
   ;; MISSING: Bounded polymorphism
   ;; MISSING: Destructuring
@@ -386,7 +424,9 @@
   ;; MISSING: macro-expansion.
   ;; MISSING: Scope handling (public vs private)
   ;; MISSING: Pre-inference annotating.
-
+  ;; MISSING: Arrays and Xor types
+  ;; MISSING: Comparing functions
+  
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
   (run '(do (ann get-object [-> java.lang.Object])
@@ -410,9 +450,9 @@
           yolo
           ))
 
-  ;; TODO: Finish refining.
   ;; TODO: Instantiate poly fns, fn-call them, then ground all bound type-vars and transform unbound type-vars into holes.
   ;; TODO: Handle let-aliasing.
+  ;; TODO: Allow recur to work with fn.
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
@@ -433,38 +473,6 @@
           ))
 
   
-  
-  ;; Refactorings to do:
-  ;; Improve type updating mechanism in recur and allow recur to work with fn.
-  ;; Fix issue with refining.
-  
-  ;; (run '(do (ann ex [-> java.lang.Exception])
-  ;;         (if true
-  ;;           (throw (ex))
-  ;;           :else)))
-
-  ;; (run '(do (ann ex [-> java.lang.Exception])
-  ;;         (if false
-  ;;           (throw (ex))
-  ;;           :else)))
-
-  (run '(do (ann test java.lang.Boolean)
-          (ann ex [-> java.lang.Exception])
-          (let [test* test]
-            (if test*
-              (throw (ex))
-              :else))))
-
-  (run '(do (ann test java.lang.Boolean)
-          (ann ex [-> java.lang.Exception])
-          (if test
-            :else
-            (throw (ex)))))
-
-  
-
-  
-
   ;; This is a valid way of implementing letfn using a macro...
   ;; (let [odd* (fn [odd even]
   ;;              (fn [x]

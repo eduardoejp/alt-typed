@@ -482,7 +482,8 @@
                                                                                         (&type/get-ref =test))
                                                                                       :else
                                                                                       (return =test))
-                                                                             :when (not= =test* [::&type/nothing])]
+                                                                             :when (and (not= =test* [::&type/nothing])
+                                                                                        (not= =test* [::&type/object 'java.lang.Boolean []]))]
                                                                         (check* ?then))
                                                                       (exec [_ (&util/with-field :types
                                                                                  (&type/solve &type/+falsey+ =test))
@@ -492,7 +493,8 @@
                                                                                         (&type/get-ref =test))
                                                                                       :else
                                                                                       (return =test))
-                                                                             :when (not= =test* [::&type/nothing])]
+                                                                             :when (and (not= =test* [::&type/nothing])
+                                                                                        (not= =test* [::&type/object 'java.lang.Boolean []]))]
                                                                         (check* ?else))])
                                                      (exec [_ (&util/with-field :types
                                                                 (&type/solve &type/+ambiguous+ =test))

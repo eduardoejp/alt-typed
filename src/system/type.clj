@@ -315,14 +315,14 @@
         ))
     ))
 
-(defn solve* [expected actual]
-  (prn 'solve* expected actual)
+(defn solve [expected actual]
+  (prn 'solve expected actual)
   (match [expected actual]
     [[::var _] _]
     (exec [? (bound-var? expected)]
       (if ?
         (exec [=type (deref-var expected)]
-          (solve* =type actual))
+          (solve =type actual))
         (bind-var expected actual)))
 
     [[::hole ?e-id] [::hole ?a-id]]
@@ -336,8 +336,8 @@
                    [=top-a =bottom-a] (match =interval-a
                                         [::interval =top =bottom]
                                         [=top =bottom])]
-             _ (solve* =top-e =top-a)
-             _ (solve* =bottom-a =bottom-e)
+             _ (solve =top-e =top-a)
+             _ (solve =bottom-a =bottom-e)
              _ (redirect-hole expected actual)]
         (return true)))
 
@@ -346,20 +346,25 @@
            :let [[=top =bottom] (match =interval
                                   [::interval =top =bottom]
                                   [=top =bottom])]]
-      (&util/parallel [(solve* expected =top)
-                       (exec [_ (solve* =top expected)
-                              _ (solve* expected =bottom)
+      (&util/parallel [(solve expected =top)
+                       (exec [_ (solve =top expected)
+                              _ (solve expected =bottom)
                               =new-top ($and expected =top)
                               _ (narrow-hole actual =new-top =bottom)]
                          (return true))]))
 
     [[::ref _] _]
     (exec [=type (get-ref expected)]
-      (solve* =type actual))
+      (solve =type actual))
 
     [_ [::ref _]]
-    (exec [=type (get-ref actual)]
-      (solve* expected =type))
+    (exec [=type (get-ref actual)
+           :let [_ (prn "Current type:" =type)]
+           :let [_ (prn "ANDing" expected =type)]
+           =new-type ($and expected =type)
+           :let [_ (prn "New type:" =new-type)]
+           _ (set-ref actual =new-type)]
+      (return true))
 
     ;; [[::var ?e-id] [::var ?a-id]]
     ;; (if (= ?e-id ?a-id)
@@ -426,23 +431,23 @@
     [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
     (if (= ?e-class ?a-class)
       (exec [_ (map-m
-                (fn [[e a]] (solve* e a))
+                (fn [[e a]] (solve e a))
                 (map vector ?e-params ?a-params))]
         (return true))
       (exec [=actual (upcast ?e-class actual)]
-        (solve* expected =actual)))
+        (solve expected =actual)))
 
     [[::tuple ?e-parts] [::tuple ?a-parts]]
     (if (<= (count ?e-parts) (count ?a-parts))
       (exec [_ (map-m
-                (fn [[e a]] (solve* e a))
+                (fn [[e a]] (solve e a))
                 (map vector ?e-parts ?a-parts))]
         (return true))
       zero)
 
     [[::object ?e-class ?e-params] [::tuple ?a-parts]]
     (exec [=elems (reduce-m $or [::nothing] ?a-parts)]
-      (solve* expected [::object 'clojure.lang.IPersistentVector [=elems]]))
+      (solve expected [::object 'clojure.lang.IPersistentVector [=elems]]))
     
     [[::object ?e-class ?e-params] [::record ?a-entries]]
     (exec [[=keys =vals] (if (empty? ?a-entries)
@@ -450,29 +455,29 @@
                            (exec [=keys (reduce-m $or [::nothing] (keys ?a-entries))
                                   =vals (reduce-m $or [::nothing] (vals ?a-entries))]
                              (return [=keys =vals])))]
-      (solve* expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
+      (solve expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
     
     [[::record ?e-entries] [::record ?a-entries]]
     (if (set/superset? (set (keys ?e-entries)) (set (keys ?a-entries)))
       (exec [_ (map-m
-                (fn [k] (solve* (get ?e-entries k) (get ?a-entries k)))
+                (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
                 (keys ?e-entries))]
         (return true))
       zero)
 
     [[::union ?types] _]
     (exec [=type (return-all ?types)
-           _ (solve* =type actual)]
+           _ (solve =type actual)]
       (return true))
 
     [[::intersection ?filter] _]
-    (exec [_ (map-m #(solve* % actual) ?filter)]
+    (exec [_ (map-m #(solve % actual) ?filter)]
       (return true))
 
     [[::complement ?type] _]
     (fn [state]
-      (if (and (empty? ((solve* ?type actual) state))
-               (empty? ((solve* actual ?type) state)))
+      (if (and (empty? ((solve ?type actual) state))
+               (empty? ((solve actual ?type) state)))
         (list [state true])
         (zero nil)))
 
@@ -481,180 +486,6 @@
 
     :else
     zero
-    ))
-
-(defn solve [expected actual]
-  (prn 'solve expected actual)
-  (match [expected actual]
-    [_ [::ref _]]
-    (exec [=type (get-ref actual)
-           :let [_ (prn "Current type:" =type)]
-           :let [_ (prn "ANDing" expected =type)]
-           =new-type ($and expected =type)
-           :let [_ (prn "New type:" =new-type)]
-           _ (set-ref actual =new-type)]
-      (return true))
-
-    :else
-    (solve* expected actual)
-
-    ;; [[::var _] _]
-    ;; (exec [? (bound-var? expected)]
-    ;;   (if ?
-    ;;     (exec [=type (deref-var expected)]
-    ;;       (solve =type actual))
-    ;;     (bind-var expected actual)))
-
-    ;; [[::hole ?e-id] [::hole ?a-id]]
-    ;; (if (= ?e-id ?a-id)
-    ;;   (return true)
-    ;;   (exec [=interval-e (get-hole expected)
-    ;;          =interval-a (get-hole actual)
-    ;;          :let [[=top-e =bottom-e] (match =interval-e
-    ;;                                     [::interval =top =bottom]
-    ;;                                     [=top =bottom])
-    ;;                [=top-a =bottom-a] (match =interval-a
-    ;;                                     [::interval =top =bottom]
-    ;;                                     [=top =bottom])]
-    ;;          _ (solve =top-e =top-a)
-    ;;          _ (solve =bottom-a =bottom-e)
-    ;;          _ (redirect-hole expected actual)]
-    ;;     (return true)))
-
-    ;; [_ [::hole _]]
-    ;; (exec [=interval (get-hole actual)
-    ;;        :let [[=top =bottom] (match =interval
-    ;;                               [::interval =top =bottom]
-    ;;                               [=top =bottom])]]
-    ;;   (&util/parallel [(solve expected =top)
-    ;;                    (exec [_ (solve =top expected)
-    ;;                           _ (solve expected =bottom)
-    ;;                           =new-top ($and expected =top)
-    ;;                           _ (narrow-hole actual =new-top =bottom)]
-    ;;                      (return true))]))
-
-    
-
-    ;; [[::var ?e-id] [::var ?a-id]]
-    ;; (if (= ?e-id ?a-id)
-    ;;   (return true)
-    ;;   (exec
-    ;;     [=interval-e (deref-var expected)
-    ;;      =interval-a (deref-var actual)
-    ;;      :let [[=top-e =bottom-e] (match =interval-e
-    ;;                                 [::interval =top =bottom]
-    ;;                                 [=top =bottom])
-    ;;            [=top-a =bottom-a] (match =interval-a
-    ;;                                 [::interval =top =bottom]
-    ;;                                 [=top =bottom])]
-    ;;      _ (solve =top-e =top-a)
-    ;;      _ (solve =bottom-a =bottom-e)
-    ;;      _ (update-var expected [::interval =top-a =bottom-a])]
-    ;;     (return true)))
-
-    ;; [[::var ?e-id] _]
-    ;; (exec
-    ;;   [=interval (deref-var expected)
-    ;;    :let [[=top =bottom] (match =interval
-    ;;                           [::interval =top =bottom]
-    ;;                           [=top =bottom])]
-    ;;    _ (solve =top actual)
-    ;;    _ (solve actual =bottom)
-    ;;    _ (update-var expected [::interval actual =bottom])]
-    ;;   (return true))
-    
-    ;; [_ [::var _]]
-    ;; (exec
-    ;;   [=interval (deref-var actual)
-    ;;    :let [[=top =bottom] (match =interval
-    ;;                           [::interval =top =bottom]
-    ;;                           [=top =bottom])]]
-    ;;   (&util/parallel [(solve expected =top)
-    ;;                    (exec
-    ;;                      [_ (solve =top expected)
-    ;;                       _ (solve expected =bottom)
-    ;;                       _ (update-var actual [::interval expected =bottom])]
-    ;;                      (return true))]))
-
-    ;; [[::any] _]
-    ;; (return true)
-
-    ;; [_ [::nothing]]
-    ;; (return true)
-
-    ;; [[::nil] [::nil]]
-    ;; (return true)
-
-    ;; [[::literal ?e-class ?e-value] [::literal ?a-class ?a-value]]
-    ;; (if (and (= ?e-class ?a-class)
-    ;;          (= ?e-value ?a-value))
-    ;;   (return true)
-    ;;   zero)
-
-    ;; [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
-    ;; (exec [? (super-class? ?class ?lit-class)]
-    ;;   (if ?
-    ;;     (return true)
-    ;;     zero))
-
-    ;; [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
-    ;; (if (= ?e-class ?a-class)
-    ;;   (exec [_ (map-m
-    ;;             (fn [[e a]] (solve e a))
-    ;;             (map vector ?e-params ?a-params))]
-    ;;     (return true))
-    ;;   (exec [=actual (upcast ?e-class actual)]
-    ;;     (solve expected =actual)))
-
-    ;; [[::tuple ?e-parts] [::tuple ?a-parts]]
-    ;; (if (<= (count ?e-parts) (count ?a-parts))
-    ;;   (exec [_ (map-m
-    ;;             (fn [[e a]] (solve e a))
-    ;;             (map vector ?e-parts ?a-parts))]
-    ;;     (return true))
-    ;;   zero)
-
-    ;; [[::object ?e-class ?e-params] [::tuple ?a-parts]]
-    ;; (exec [=elems (reduce-m $or [::nothing] ?a-parts)]
-    ;;   (solve expected [::object 'clojure.lang.IPersistentVector [=elems]]))
-    
-    ;; [[::object ?e-class ?e-params] [::record ?a-entries]]
-    ;; (exec [[=keys =vals] (if (empty? ?a-entries)
-    ;;                        (return [[::nothing] [::nothing]])
-    ;;                        (exec [=keys (reduce-m $or [::nothing] (keys ?a-entries))
-    ;;                               =vals (reduce-m $or [::nothing] (vals ?a-entries))]
-    ;;                          (return [=keys =vals])))]
-    ;;   (solve expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
-    
-    ;; [[::record ?e-entries] [::record ?a-entries]]
-    ;; (if (set/superset? (set (keys ?e-entries)) (set (keys ?a-entries)))
-    ;;   (exec [_ (map-m
-    ;;             (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
-    ;;             (keys ?e-entries))]
-    ;;     (return true))
-    ;;   zero)
-
-    ;; [[::union ?types] _]
-    ;; (exec [=type (return-all ?types)
-    ;;        _ (solve =type actual)]
-    ;;   (return true))
-
-    ;; [[::intersection ?filter] _]
-    ;; (exec [_ (map-m #(solve % actual) ?filter)]
-    ;;   (return true))
-
-    ;; [[::complement ?type] _]
-    ;; (fn [state]
-    ;;   (if (and (empty? ((solve ?type actual) state))
-    ;;            (empty? ((solve actual ?type) state)))
-    ;;     (list [state true])
-    ;;     (zero nil)))
-
-    ;; [[::io] [::io]]
-    ;; (return true)
-
-    ;; :else
-    ;; zero
     ))
 
 ;; Monads / Type-functions
@@ -737,9 +568,9 @@
       
       [[<tag> ?base] _]
       (exec [veredicts (map-m (fn [=base]
-                                (&util/try-all [(exec [_ (solve* =base addition)]
+                                (&util/try-all [(exec [_ (solve =base addition)]
                                                   (return <LT>))
-                                                (exec [_ (solve* addition =base)]
+                                                (exec [_ (solve addition =base)]
                                                   (return <GT>))
                                                 (return :peer)]))
                               ?base)]
@@ -758,10 +589,10 @@
                 (return addition))))
       
       [_ _]
-      (&util/try-all [(exec [_ (solve* base addition)
+      (&util/try-all [(exec [_ (solve base addition)
                              :let [_ (prn "<LT>")]]
                         (return <LT-ret>))
-                      (exec [_ (solve* addition base)
+                      (exec [_ (solve addition base)
                              :let [_ (prn "<GT>")]]
                         (return <GT-ret>))
                       (exec [_ (return nil)
@@ -778,10 +609,10 @@
     [_ [::union ?addition]]
     (reduce-m (fn [=filter =refinement]
                 (prn '[AND] =filter =refinement)
-                (&util/try-all [(exec [_ (solve* =filter =refinement)
+                (&util/try-all [(exec [_ (solve =filter =refinement)
                                        :let [_ (prn "Case #1")]]
                                   (return =refinement))
-                                (exec [_ (solve* =refinement =filter)
+                                (exec [_ (solve =refinement =filter)
                                        :let [_ (prn "Case #2")]]
                                   (return =filter))
                                 (match [=filter =refinement]
@@ -803,9 +634,9 @@
     
     [[::intersection ?base] _]
     (exec [veredicts (map-m (fn [=base]
-                              (&util/try-all [(exec [_ (solve* =base addition)]
+                              (&util/try-all [(exec [_ (solve =base addition)]
                                                 (return :child))
-                                              (exec [_ (solve* addition =base)]
+                                              (exec [_ (solve addition =base)]
                                                 (return :parent))
                                               (return :peer)]))
                             ?base)]
@@ -824,9 +655,9 @@
               (return addition))))
     
     [_ _]
-    (&util/try-all [(exec [_ (solve* base addition)]
+    (&util/try-all [(exec [_ (solve base addition)]
                       (return addition))
-                    (exec [_ (solve* addition base)]
+                    (exec [_ (solve addition base)]
                       (return base))
                     (match [base addition]
                       [[::object ?filter _] [::object ?refinement _]]
