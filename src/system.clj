@@ -425,7 +425,7 @@
   ;; MISSING: Scope handling (public vs private)
   ;; MISSING: Pre-inference annotating.
   ;; MISSING: Arrays and Xor types
-  ;; MISSING: Comparing functions
+  ;; MISSING: Solving functions
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.

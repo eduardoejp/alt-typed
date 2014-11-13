@@ -39,31 +39,33 @@
              [::hole id]]))))
 
 (defn get-hole [hole]
+  ;; (prn 'get-hole/_1 hole)
   (match hole
     [::hole ?id]
     (fn [^Types state]
+      ;; (prn 'get-hole/_1 state)
       (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
         (if (contains? mappings ?id)
           (let [=type (get mappings ?id)]
             (match =type
-              [::hole _]
-              ((get-hole =type) state)
+              [::interval ?top ?bottom]
+              (list [state [?top ?bottom]])
               
-              :else
-              (list [state =type])))
+              [::hole _]
+              ((get-hole =type) state)))
           '())))))
 
 (defn narrow-hole [hole top bottom]
   (match hole
     [::hole ?id]
-    (exec [interval (get-hole hole)
-           :let [[?top ?bottom] (match interval
-                                  [::interval ?top ?bottom]
-                                  [?top ?bottom])]
-           _ (solve ?top top)
-           _ (solve bottom ?bottom)]
-      (fn [state]
-        (list [(assoc-in state [:heap :mappings ?id] [::interval top bottom]) nil])))))
+    (fn [state]
+      (list [(assoc-in state [:heap :mappings ?id] [::interval top bottom]) nil]))
+    ;; (exec [[?top ?bottom] (get-hole hole)
+    ;;        _ (solve ?top top)
+    ;;        _ (solve bottom ?bottom)]
+    ;;   (fn [state]
+    ;;     (list [(assoc-in state [:heap :mappings ?id] [::interval top bottom]) nil])))
+    ))
 
 (defn redirect-hole [from to]
   (match [from to]
@@ -72,9 +74,11 @@
       (list [(assoc-in state [:heap :mappings ?id] to) nil]))))
 
 (defn normalize-hole [hole]
+  ;; (prn 'normalize-hole/_1 hole)
   (match hole
     [::hole ?id]
     (fn [^Types state]
+      ;; (prn 'normalize-hole/_1 state)
       (if-let [=type (-> state ^TypeHeap (.-heap) .-mappings (get ?id))]
         (match =type
           [::hole _]
@@ -130,39 +134,6 @@
       (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
         (if-let [=type (get mappings ?id)]
           (list [state =type])
-          '())))))
-
-;; Monads / refs
-(defn create-ref [type]
-  (fn [^Types state]
-    (let [id (-> state ^TypeHeap (.-heap) .-counter)]
-      (list [(update-in state [:heap]
-                        #(-> %
-                             (update-in [:counter] inc)
-                             (assoc-in [:mappings id] type)))
-             [::ref id]]))))
-
-(do-template [<fn> <return>]
-  (defn <fn> [ref]
-    (match ref
-      [::ref ?id]
-      (fn [^Types state]
-        (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
-          (if (contains? mappings ?id)
-            (list <return>)
-            '())))))
-
-  get-ref    [state (get mappings ?id)]
-  delete-ref [(update-in state [:heap :mappings] dissoc ?id) nil]
-  )
-
-(defn set-ref [ref type]
-  (match ref
-    [::ref ?id]
-    (fn [^Types state]
-      (let [mappings (-> state ^TypeHeap (.-heap) :mappings)]
-        (if (contains? mappings ?id)
-          (list [(assoc-in state [:heap :mappings ?id] type) nil])
           '())))))
 
 ;; Monads / DB
@@ -316,7 +287,7 @@
     ))
 
 (defn solve [expected actual]
-  (prn 'solve expected actual)
+  ;; (prn 'solve expected actual)
   (match [expected actual]
     [[::var _] _]
     (exec [? (bound-var? expected)]
@@ -328,42 +299,19 @@
     [[::hole ?e-id] [::hole ?a-id]]
     (if (= ?e-id ?a-id)
       (return true)
-      (exec [=interval-e (get-hole expected)
-             =interval-a (get-hole actual)
-             :let [[=top-e =bottom-e] (match =interval-e
-                                        [::interval =top =bottom]
-                                        [=top =bottom])
-                   [=top-a =bottom-a] (match =interval-a
-                                        [::interval =top =bottom]
-                                        [=top =bottom])]
+      (exec [[=top-e =bottom-e] (get-hole expected)
+             [=top-a =bottom-a] (get-hole actual)
              _ (solve =top-e =top-a)
              _ (solve =bottom-a =bottom-e)
              _ (redirect-hole expected actual)]
         (return true)))
 
     [_ [::hole _]]
-    (exec [=interval (get-hole actual)
-           :let [[=top =bottom] (match =interval
-                                  [::interval =top =bottom]
-                                  [=top =bottom])]]
-      (&util/parallel [(solve expected =top)
-                       (exec [_ (solve =top expected)
-                              _ (solve expected =bottom)
-                              =new-top ($and expected =top)
-                              _ (narrow-hole actual =new-top =bottom)]
-                         (return true))]))
-
-    [[::ref _] _]
-    (exec [=type (get-ref expected)]
-      (solve =type actual))
-
-    [_ [::ref _]]
-    (exec [=type (get-ref actual)
-           :let [_ (prn "Current type:" =type)]
-           :let [_ (prn "ANDing" expected =type)]
-           =new-type ($and expected =type)
-           :let [_ (prn "New type:" =new-type)]
-           _ (set-ref actual =new-type)]
+    (exec [[=top =bottom] (get-hole actual)
+           =new-top ($and expected =top)
+           ;; :let [_ (prn '=new-top =top expected =new-top)]
+           :when (not= [::nothing] =new-top)
+           _ (narrow-hole actual =new-top =bottom)]
       (return true))
 
     ;; [[::var ?e-id] [::var ?a-id]]
@@ -465,6 +413,10 @@
         (return true))
       zero)
 
+    [_ [::union ?types]]
+    (exec [_ (map-m #(solve expected %) ?types)]
+      (return true))
+    
     [[::union ?types] _]
     (exec [=type (return-all ?types)
            _ (solve =type actual)]
@@ -561,7 +513,7 @@
 ;; Monads / Types
 (do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]
   (defn <fn> [base addition]
-    (prn '<fn> base addition)
+    ;; (prn '<fn> base addition)
     (match [base addition]
       [_ [<tag> ?addition]]
       (reduce-m <fn> base ?addition)
@@ -590,13 +542,16 @@
       
       [_ _]
       (&util/try-all [(exec [_ (solve base addition)
-                             :let [_ (prn "<LT>")]]
+                             ;; :let [_ (prn "<LT>")]
+                             ]
                         (return <LT-ret>))
                       (exec [_ (solve addition base)
-                             :let [_ (prn "<GT>")]]
+                             ;; :let [_ (prn "<GT>")]
+                             ]
                         (return <GT-ret>))
                       (exec [_ (return nil)
-                             :let [_ (prn "<=/=>")]]
+                             ;; :let [_ (prn "<=/=>")]
+                             ]
                         (return [<tag> [base addition]]))])
       ))
 
@@ -608,20 +563,23 @@
   (match [base addition]
     [_ [::union ?addition]]
     (reduce-m (fn [=filter =refinement]
-                (prn '[AND] =filter =refinement)
+                ;; (prn '[AND] =filter =refinement)
                 (&util/try-all [(exec [_ (solve =filter =refinement)
-                                       :let [_ (prn "Case #1")]]
+                                       ;; :let [_ (prn "Case #1")]
+                                       ]
                                   (return =refinement))
                                 (exec [_ (solve =refinement =filter)
-                                       :let [_ (prn "Case #2")]]
+                                       ;; :let [_ (prn "Case #2")]
+                                       ]
                                   (return =filter))
                                 (match [=filter =refinement]
                                   [[::object ?filter _] [::object ?refinement _]]
                                   (exec [?1 (interface? ?filter)
                                          ?2 (interface? ?refinement)
-                                         :let [_ (prn "Case #3..." ?filter ?1 ?refinement ?2)]
+                                         ;; :let [_ (prn "Case #3..." ?filter ?1 ?refinement ?2)]
                                          :when (and ?1 ?2)
-                                         :let [_ (prn "Case #3")]]
+                                         ;; :let [_ (prn "Case #3")]
+                                         ]
                                     ($and =filter =refinement))
                                   
                                   :else

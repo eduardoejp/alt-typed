@@ -15,21 +15,25 @@
 ;; [Utils]
 (defn ^:private clean-env [to-clean type]
   (match type
-    [::&type/ref _]
-    (exec [=type (&util/with-field :types
-                   (&type/get-ref type))
-           :let [=type (match =type
-                         [::&type/interval ?top ?bottom]
-                         ?top
-                         
-                         :else
-                         =type)]
-           =type (clean-env to-clean =type)
-           _ (&util/with-field :types
-               (&type/set-ref type =type))]
+    [::&type/hole _]
+    (exec [[=top =bottom] (&util/with-field :types
+                            (&type/get-hole type))
+           =top (clean-env to-clean =top)
+           =bottom (clean-env to-clean =bottom)
+           ;; :let [_ (prn 'clean-env type =top =bottom)]
+           ]
       (if (contains? to-clean type)
-        (return =type)
-        (return type)))
+        (return (cond (= [::&type/nothing] =bottom)
+                      =top
+                      
+                      (= [::&type/any] =top)
+                      =bottom
+
+                      :else
+                      =top))
+        (exec [_ (&util/with-field :types
+                   (&type/narrow-hole type =top =bottom))]
+          (return type))))
     
     ;; [::&type/var _]
     ;; (exec
@@ -60,36 +64,34 @@
     :else
     (return type)))
 
-(defn ^:private clean-holes [to-clean type]
-  (prn 'clean-holes to-clean type)
-  (match type
-    [::&type/hole _]
-    (if (contains? to-clean type)
-      (exec [=type (&util/with-field :types
-                     (&type/get-hole type))
-             :let [=type (match =type
-                           [::&type/interval ?top ?bottom]
-                           (if (= [::&type/any] ?top)
-                             ?bottom
-                             ?top))]]
-        (clean-holes to-clean =type))
-      (return type))
+;; (defn ^:private clean-holes [to-clean type]
+;;   ;; (prn 'clean-holes to-clean type)
+;;   (match type
+;;     [::&type/hole _]
+;;     (if (contains? to-clean type)
+;;       (exec [[?top ?bottom] (&util/with-field :types
+;;                               (&type/get-hole type))
+;;              :let [=type (if (= [::&type/any] ?top)
+;;                            ?bottom
+;;                            ?top)]]
+;;         (clean-holes to-clean =type))
+;;       (return type))
     
-    [::&type/object ?class ?params]
-    (exec [=params (map-m (partial clean-holes to-clean) ?params)]
-      (return [::&type/object ?class =params]))
+;;     [::&type/object ?class ?params]
+;;     (exec [=params (map-m (partial clean-holes to-clean) ?params)]
+;;       (return [::&type/object ?class =params]))
 
-    [::&type/union ?types]
-    (exec [=types (map-m (partial clean-holes to-clean) ?types)]
-      (&util/with-field :types
-        (reduce-m &type/$or [::&type/nothing] =types)))
+;;     [::&type/union ?types]
+;;     (exec [=types (map-m (partial clean-holes to-clean) ?types)]
+;;       (&util/with-field :types
+;;         (reduce-m &type/$or [::&type/nothing] =types)))
 
-    [::&type/complement ?type]
-    (exec [=type (clean-holes to-clean ?type)]
-      (return [::&type/complement =type]))
+;;     [::&type/complement ?type]
+;;     (exec [=type (clean-holes to-clean ?type)]
+;;       (return [::&type/complement =type]))
     
-    :else
-    (return type)))
+;;     :else
+;;     (return type)))
 
 (defn with-env [env inner]
   (exec [:let [bound-ids (-> env vals set)]
@@ -101,25 +103,26 @@
              &env/exit)]
     (return =type)))
 
+(defn with-env* [env inner]
+  (exec [:let [bound-ids (-> env vals set)]
+         _ (&util/with-field :env
+             (&env/enter env))
+         =type inner
+         _ (&util/with-field :env
+             &env/exit)]
+    (return =type)))
+
 (defn ^:private extract-holes [type]
   (match type
     [::&type/hole _]
     (exec [=hole (&util/with-field :types
                    (&type/normalize-hole type))
-           =interval (&util/with-field :types
-                       (&type/get-hole =hole))
-           :let [[=top =bottom] (match =interval
-                                  [::&type/interval =top =bottom]
-                                  [=top =bottom])]
+           [=top =bottom] (&util/with-field :types
+                            (&type/get-hole =hole))
            at-top (extract-holes =top)
            at-bottom (extract-holes =bottom)
            :let [total-count (merge-with + {=hole 1} at-top at-bottom)]]
       (return total-count))
-    
-    [::&type/ref _]
-    (exec [=type (&util/with-field :types
-                   (&type/get-ref type))]
-      (extract-holes =type))
     
     ;; [::&type/var _]
     ;; (return (list type))
@@ -156,11 +159,8 @@
                      (&type/normalize-hole type))]
         (if-let [var-name (get mappings =type)]
           (return var-name)
-          (exec [=interval (&util/with-field :types
-                             (&type/get-hole =type))
-                 :let [[=top =bottom] (match =interval
-                                        [::&type/interval =top =bottom]
-                                        [=top =bottom])]
+          (exec [[=top =bottom] (&util/with-field :types
+                                  (&type/get-hole =type))
                  ;; =top (prettify-type mappings =top)
                  ;; =bottom (prettify-type mappings =bottom)
                  ;; _ (&util/with-field :types
@@ -169,11 +169,6 @@
             ;; (return type)
             (prettify-type mappings =top)))))
     
-    [::&type/ref _]
-    (exec [=type (&util/with-field :types
-                   (&type/get-ref type))]
-      (prettify-type mappings =type))
-
     [::&type/var _]
     (&util/try-all [(exec [=type (&util/with-field :types
                                    (&type/deref-var type))
@@ -230,11 +225,6 @@
 
 (defn ->pretty [type]
   (match type
-    [::&type/ref _]
-    (exec [=type (&util/with-field :types
-                   (&type/get-ref type))]
-      (->pretty =type))
-
     [::&type/var _]
     (exec [=type (&util/with-field :types
                    (&type/deref-var type))]
@@ -285,29 +275,31 @@
                       (symbol (str alphabet))
                       (symbol (str alphabet idx))))]
   (defn ^:private generalize-arity [arity]
+    ;; (prn 'generalize-arity arity)
     (match arity
       [::&type/arity ?args ?body]
       (exec [body-vars (extract-holes ?body)
+             ;; :let [_ (prn 'body-vars body-vars)]
              args-vars (exec [all-holes (map-m extract-holes ?args)]
                          (return (apply merge-with + all-holes)))
+             ;; :let [_ (prn 'args-vars args-vars)]
              :let [poly-vars (merge-with + args-vars body-vars)
                    poly-vars (sort < (for [[k cnt] poly-vars
                                            :when (> cnt 1)]
                                        (nth k 1)))
+                   ;; _ (prn 'poly-vars poly-vars)
                    used-vars (take (count poly-vars) +var-names+)
                    mappings (into {} (map (fn [id name]
                                             [[::&type/hole id] name])
                                           poly-vars used-vars))
+                   ;; _ (prn 'mappings mappings)
                    rev-mappings (set/map-invert mappings)]
              arity* (prettify-type mappings arity)]
         (if (empty? used-vars)
           (return arity*)
           (exec [user-vars* (map-m (fn [uv]
-                                     (exec [=interval (&util/with-field :types
-                                                        (&type/get-hole (get rev-mappings uv)))
-                                            :let [[=top =bottom] (match =interval
-                                                                   [::&type/interval =top =bottom]
-                                                                   [=top =bottom])]]
+                                     (exec [[=top =bottom] (&util/with-field :types
+                                                             (&type/get-hole (get rev-mappings uv)))]
                                        (return (if (= [::&type/any] =top)
                                                  uv
                                                  [uv '< =top]))))
@@ -347,7 +339,7 @@
       (return ?return))))
 
 (defn ^:private fn-call [=fn =args]
-  (prn 'fn-call =fn =args)
+  ;; (prn 'fn-call =fn =args)
   (exec [=fn (&util/with-field :types
                (exec [=fn (&type/instantiate =fn)]
                  (if (&type/type-fn? =fn)
@@ -462,11 +454,14 @@
     (exec [=value (check* ?value)
            [?label =value] (match ?label
                              [::&parser/symbol ?local]
-                             (exec [_ (&util/with-field :types
-                                        (&type/solve [::&type/any] =value))]
-                               (return [?local =value])))
+                             (return [?local =value]))
+           ;; :let [_ (prn ::&parser/let '[?label =value] [?label =value])]
            =binding (&util/with-field :types
-                      (&type/create-ref =value))]
+                      (exec [=hole &type/fresh-hole
+                             _ (&type/narrow-hole =hole =value [::&type/nothing])]
+                        (return =hole)))
+           ;; :let [_ (prn ::&parser/let '=binding =binding)]
+           ]
       (with-env {?label =binding}
         (if (empty? ?bindings)
           (check* ?body)
@@ -477,9 +472,10 @@
                                      (&util/try-all [(&util/parallel [(exec [_ (&util/with-field :types
                                                                                  (&type/solve &type/+truthy+ =test))
                                                                              =test* (match =test
-                                                                                      [::&type/ref _]
-                                                                                      (&util/with-field :types
-                                                                                        (&type/get-ref =test))
+                                                                                      [::&type/hole _]
+                                                                                      (exec [[=top =bottom] (&util/with-field :types
+                                                                                                              (&type/get-hole =test))]
+                                                                                        (return =top))
                                                                                       :else
                                                                                       (return =test))
                                                                              :when (and (not= =test* [::&type/nothing])
@@ -488,9 +484,10 @@
                                                                       (exec [_ (&util/with-field :types
                                                                                  (&type/solve &type/+falsey+ =test))
                                                                              =test* (match =test
-                                                                                      [::&type/ref _]
-                                                                                      (&util/with-field :types
-                                                                                        (&type/get-ref =test))
+                                                                                      [::&type/hole _]
+                                                                                      (exec [[=top =bottom] (&util/with-field :types
+                                                                                                              (&type/get-hole =test))]
+                                                                                        (return =top))
                                                                                       :else
                                                                                       (return =test))
                                                                              :when (and (not= =test* [::&type/nothing])
@@ -503,7 +500,8 @@
                                                        (&util/with-field :types
                                                          (&type/parallel =then =else)))
                                                      ])))
-           :let [_ (prn 'branches (mapv second branches))]]
+           ;; :let [_ (prn 'branches (mapv second branches))]
+           ]
       (&util/spread branches))
     
     [::&parser/case ?value ?clauses ?default]
@@ -532,18 +530,23 @@
     (exec [=locals (map-m (fn [[label value]]
                             (exec [=value (&util/with-field :env
                                             (&env/resolve value))
-                                   =value (&util/with-field :types
-                                            (&type/get-ref =value))
+                                   [=top =bottom] (&util/with-field :types
+                                                    (&type/get-hole =value))
+                                   ;; :let [_ (prn ::&parser/loop [label =value] [=top =bottom])]
                                    =hole (&util/with-field :types
                                            (exec [=hole &type/fresh-hole
-                                                  _ (&type/narrow-hole =hole [::&type/any] =value)]
+                                                  _ (&type/narrow-hole =hole [::&type/any] =top)
+                                                  [=top* =bottom*] (&type/get-hole =hole)
+                                                  ;; :let [_ (prn ::&parser/loop =hole [=top* =bottom*])]
+                                                  ]
                                              (return =hole)))]
                               (return [label =hole])))
                           ?locals)
            =body (with-env (into {::recur (mapv second =locals)}
                                  =locals)
                    (check* ?body))]
-      (clean-holes (into #{} (map second =locals)) =body))
+      ;; (clean-holes (into #{} (map second =locals)) =body)
+      (return =body))
 
     [::&parser/recur ?args]
     (exec [=recur (&util/with-field :env
@@ -660,8 +663,8 @@
                                                        (&util/with-field :types
                                                          &type/fresh-hole))
                                                      ?args)
-                                        =return (with-env {?local-name =fn}
-                                                  (with-env (into {} (map vector ?args =args))
+                                        =return (with-env* {?local-name =fn}
+                                                  (with-env* (into {} (map vector ?args =args))
                                                     (check* ?body)))]
                                    (generalize-arity [::&type/arity =args =return])))]
       (case (count worlds)
@@ -765,7 +768,7 @@
                   %)]
      (if (empty? results)
        '()
-       (do (prn '(count results) (count results) (mapv second results))
+       (do ;; (prn '(count results) (count results) (mapv second results))
          ((&util/with-field :types
             (reduce-m &type/parallel [::&type/nothing] (mapv second results)))
           %)))
