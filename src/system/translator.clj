@@ -4,6 +4,7 @@
 
 ;; Functions
 (defn type->code [type]
+  ;; (prn 'type->code type)
   (match type
     [::&type/any]
     'Any

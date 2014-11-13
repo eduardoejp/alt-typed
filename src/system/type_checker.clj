@@ -51,7 +51,7 @@
     [::&type/union ?types]
     (exec [=types (map-m (partial clean-env to-clean) ?types)]
       (&util/with-field :types
-        (&type/$or (vec =types))))
+        (reduce-m &type/$or [::&type/nothing] =types)))
 
     [::&type/complement ?type]
     (exec [=type (clean-env to-clean ?type)]
@@ -82,7 +82,7 @@
     [::&type/union ?types]
     (exec [=types (map-m (partial clean-holes to-clean) ?types)]
       (&util/with-field :types
-        (&type/$or (vec =types))))
+        (reduce-m &type/$or [::&type/nothing] =types)))
 
     [::&type/complement ?type]
     (exec [=type (clean-holes to-clean ?type)]
@@ -210,7 +210,7 @@
     [::&type/union ?types]
     (exec [=types (map-m (partial prettify-type mappings) ?types)]
       (&util/with-field :types
-        (&type/$or =types)))
+        (reduce-m &type/$or [::&type/nothing] =types)))
 
     [::&type/complement ?type]
     (exec [=type (prettify-type mappings ?type)]
@@ -256,7 +256,7 @@
     [::&type/union ?types]
     (exec [=types (map-m ->pretty ?types)]
       (&util/with-field :types
-        (&type/$or =types)))
+        (reduce-m &type/$or [::&type/nothing] =types)))
 
     [::&type/complement ?type]
     (exec [=type (->pretty ?type)]
@@ -331,7 +331,7 @@
         (let [batch (if (= 1 (count taken))
                       (list [state (-> taken first (nth 1))])
                       (list [state (let [[[_ returns]] ((&util/with-field :types
-                                                          (&type/parallel-combine-types (mapv #(-> % (nth 1) (nth 2)) taken))) state)]
+                                                          (reduce-m &type/parallel [::&type/nothing] (mapv #(-> % (nth 1) (nth 2)) taken))) state)]
                                      (-> taken first (nth 1) (assoc-in [2] returns)))])
                       )]
           (concat batch ((merge-arities left) state))))
@@ -412,12 +412,10 @@
     (return [::&type/literal 'clojure.lang.Symbol ?value])
 
     [::&parser/#list ?value]
-    (if (empty? ?value)
-      (return [::&type/object 'clojure.lang.PersistentList [[::&type/nothing]]])
-      (exec [=elems (map-m check* ?value)
-             =elems (&util/with-field :types
-                      (&type/$or (vec =elems)))]
-        (return [::&type/object 'clojure.lang.PersistentList [=elems]])))
+    (exec [=elems (map-m check* ?value)
+           =elems (&util/with-field :types
+                    (reduce-m &type/$or [::&type/nothing] =elems))]
+      (return [::&type/object 'clojure.lang.PersistentList [=elems]]))
     
     [::&parser/#vector ?value]
     (if (empty? ?value)
@@ -436,12 +434,10 @@
         (return [::&type/record (into {} =elems)])))
 
     [::&parser/#set ?value]
-    (if (empty? ?value)
-      (return [::&type/object 'clojure.lang.IPersistentSet [[::&type/nothing]]])
-      (exec [=elems (map-m check* ?value)
-             =elems (&util/with-field :types
-                      (&type/$or (vec =elems)))]
-        (return [::&type/object 'clojure.lang.IPersistentSet [=elems]])))
+    (exec [=elems (map-m check* ?value)
+           =elems (&util/with-field :types
+                    (reduce-m &type/$or [::&type/nothing] =elems))]
+      (return [::&type/object 'clojure.lang.IPersistentSet [=elems]]))
     
     [::&parser/symbol ?symbol]
     (if-let [ns (namespace ?symbol)]
@@ -455,18 +451,12 @@
         (return =symbol)))
     
     [::&parser/do & ?forms]
-    (case (count ?forms)
-      0 (return [::&type/nil])
-      1 (exec [?form (&parser/parse (first ?forms))]
-          (check* ?form))
-      ;; else
-      (exec [=forms (map-m
-                     (fn [?form]
-                       (exec [?form (&parser/parse ?form)]
-                         (check* ?form)))
-                     ?forms)
-             =body (&type/sequentially-combine-types =forms)]
-        (return =body)))
+    (exec [=forms (map-m (fn [?form]
+                           (exec [?form (&parser/parse ?form)]
+                             (check* ?form)))
+                         ?forms)]
+      (&util/with-field :types
+        (reduce-m &type/sequential [::&type/nil] =forms)))
 
     [::&parser/let ([[?label ?value] & ?bindings] :seq) ?body]
     (exec [=value (check* ?value)
@@ -483,35 +473,44 @@
           (check* [::&parser/let ?bindings ?body]))))
 
     [::&parser/if ?test ?then ?else]
-    (exec [=dispatch-type (match ?test
-                            [::&parser/symbol]
-                            (exec [=test (check* ?test)]
-                              (fn-call &type/+if-pred+ (list =test)))
-
-                            :else
-                            (check* ?test))
-           :let [_ (prn '=dispatch-type =dispatch-type)]]
-      (&util/try-all [(exec [_ (&util/with-field :types
-                                 (&type/solve &type/+truthy+ =dispatch-type))]
-                        (check* ?then))
-                      (exec [_ (&util/with-field :types
-                                 (&type/solve &type/+falsey+ =dispatch-type))]
-                        (check* ?else))
-                      (exec [_ (&util/with-field :types
-                                 (&type/solve [::&type/any] =dispatch-type))
-                             =then (check* ?then)
-                             =else (check* ?else)]
-                        (&util/with-field :types
-                          (&type/parallel-combine-types [=then =else])))
-                      ]))
-
+    (exec [branches (&util/collect (exec [=test (check* ?test)]
+                                     (&util/try-all [(&util/parallel [(exec [_ (&util/with-field :types
+                                                                                 (&type/solve &type/+truthy+ =test))
+                                                                             =test* (match =test
+                                                                                      [::&type/ref _]
+                                                                                      (&util/with-field :types
+                                                                                        (&type/get-ref =test))
+                                                                                      :else
+                                                                                      (return =test))
+                                                                             :when (not= =test* [::&type/nothing])]
+                                                                        (check* ?then))
+                                                                      (exec [_ (&util/with-field :types
+                                                                                 (&type/solve &type/+falsey+ =test))
+                                                                             =test* (match =test
+                                                                                      [::&type/ref _]
+                                                                                      (&util/with-field :types
+                                                                                        (&type/get-ref =test))
+                                                                                      :else
+                                                                                      (return =test))
+                                                                             :when (not= =test* [::&type/nothing])]
+                                                                        (check* ?else))])
+                                                     (exec [_ (&util/with-field :types
+                                                                (&type/solve &type/+ambiguous+ =test))
+                                                            =then (check* ?then)
+                                                            =else (check* ?else)]
+                                                       (&util/with-field :types
+                                                         (&type/parallel =then =else)))
+                                                     ])))
+           :let [_ (prn 'branches (mapv second branches))]]
+      (&util/spread branches))
+    
     [::&parser/case ?value ?clauses ?default]
     (exec [=branches* (map-m
                        (fn [[?test ?form]]
                          (exec [=test (if (seq? ?test)
                                         (exec [?parts (map-m check* ?test)]
                                           (&util/with-field :types
-                                            (&type/$or (vec ?parts))))
+                                            (reduce-m &type/$or [::&type/nothing] ?parts)))
                                         (check* ?test))]
                            (return [=test ?form])))
                        ?clauses)
@@ -615,8 +614,10 @@
                          (return =body))
            =catches (map-m check* ?catches)
            =finally (check* ?finally)
-           =all-returning (&type/parallel-combine-types (cons =clean-body =catches))]
-      (&type/sequentially-combine-types [=finally =all-returning]))
+           =all-returning (&util/with-field :types
+                            (reduce-m &type/parallel [::&type/nothing] (cons =clean-body =catches)))]
+      (&util/with-field :types
+        (&type/sequential =finally =all-returning)))
 
     [::&parser/catch ?class ?label ?body]
     (with-env {?label [::&type/object ?class []]}
@@ -760,11 +761,10 @@
   #(let [results ((exec [raw (check* form)]
                     (->pretty raw))
                   %)]
-     (case (count results)
-       0 '()
-       1 (list [% (-> results first (nth 1))])
-       ;; else
-       ((&util/with-field :types
-          (&type/parallel-combine-types (mapv second results)))
-        %)
-       )))
+     (if (empty? results)
+       '()
+       (do (prn '(count results) (count results) (mapv second results))
+         ((&util/with-field :types
+            (reduce-m &type/parallel [::&type/nothing] (mapv second results)))
+          %)))
+     ))

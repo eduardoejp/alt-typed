@@ -104,10 +104,16 @@
     'Macro
     (return [::&types/macro])
     
-    (['Or & ?params] :seq)
-    (exec [*types (map-m (partial parse-type-def local-syms) ?params)]
-      (return [::&types/union (vec *types)]))
+    (['Or ?param & ?params] :seq)
+    (exec [[*type & *types] (map-m (partial parse-type-def local-syms) (cons ?param ?params))]
+      (&util/with-field :types
+        (reduce-m &types/$or *type *types)))
 
+    (['And ?param & ?params] :seq)
+    (exec [[*type & *types] (map-m (partial parse-type-def local-syms) (cons ?param ?params))]
+      (&util/with-field :types
+        (reduce-m &types/$and *type *types)))
+    
     (['Not ?inner] :seq)
     (exec [*inner (parse-type-def local-syms ?inner)]
       (return [::&types/complement *inner]))

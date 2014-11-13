@@ -97,7 +97,7 @@
               (ann yolo IntOrString)
               yolo)
 
-            ((Or "YOLO" java.lang.Long))
+            ((Or java.lang.Long "YOLO"))
             (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
               (let [result (parse-int "1234")]
                 (if result
@@ -124,7 +124,7 @@
               (fn foo [x]
                 (parse-int x)))
 
-            ([java.lang.String -> (Or "YOLO" java.lang.Long)])
+            ([java.lang.String -> (Or java.lang.Long "YOLO")])
             (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
               (fn foo [x]
                 (let [result (parse-int x)]
@@ -368,20 +368,13 @@
               (f x))
             )))
 
-  (run '(do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
-          (let [result (parse-int "1234")]
-            (if result
-              result
-              "YOLO"))))
-
   (run '(do (ann inc [java.lang.Long -> java.lang.Long])
+          (ann = [Any Any -> java.lang.Boolean])
           (loop [a 0]
             (if (= 10 a)
               a
               (recur (inc a))))))
 
-
-  
   ;; MISSING: Bounded polymorphism
   ;; MISSING: Destructuring
   ;; MISSING: Recursive types
@@ -419,7 +412,6 @@
 
   ;; TODO: Finish refining.
   ;; TODO: Instantiate poly fns, fn-call them, then ground all bound type-vars and transform unbound type-vars into holes.
-  ;; TODO: Use a polymorphic dispatch-fn on 'if's when ::&parser/symbol must be refined: (Fn [Truthy -> true] [Falsey -> false] [Ambiguous -> Boolean]), where Ambiguous = (And (Not Truthy) (Not Falsey))
   ;; TODO: Handle let-aliasing.
   ;; TODO: 
   

@@ -12,7 +12,7 @@
 
 ;; [Data]
 (defrecord TypeHeap [counter mappings])
-(defrecord Types [db heap class-hierarchy casts members])
+(defrecord Types [db heap class-hierarchy class-categories casts members])
 
 ;; [Utils]
 (defn ^:private defined? [hierarchy class]
@@ -24,12 +24,9 @@
 ;; Constants
 (def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
 (def +truthy+ [::complement +falsey+])
-(def +ambiguous+ [::intersection (list [::complement +truthy+] [::complement +falsey+])])
-(def +if-pred+ [::function (list [::arity (list +truthy+) [::literal 'java.lang.Boolean true]]
-                                 [::arity (list +falsey+) [::literal 'java.lang.Boolean false]]
-                                 [::arity (list +ambiguous+) [::object 'java.lang.Boolean []]])])
+(def +ambiguous+ [::any])
 
-(def +init+ (Types. {} (TypeHeap. 0 {}) (make-hierarchy) {} {}))
+(def +init+ (Types. {} (TypeHeap. 0 {}) (make-hierarchy) {} {} {}))
 
 ;; Monads / holes
 (def fresh-hole
@@ -198,12 +195,19 @@
                                                    (for [[_ class _] parents] (qualify-class class)))]
                             (list [(-> state
                                        (assoc :class-hierarchy hierarchy*)
+                                       (assoc-in [:class-categories class] :class)
                                        (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
                                                                                 [p-class [::all {} params [::object p-class p-params]]])
                                                                               parents))))
                                    nil]))
                           '()))
                       ))]))
+
+(defn interface? [class]
+  (fn [state]
+    (if (= :interface (get-in state [:class-categories class]))
+      (list [state true])
+      '())))
 
 (defn define-class-members [class all-members]
   (exec [=class (resolve class)
@@ -311,14 +315,14 @@
         ))
     ))
 
-(defn solve [expected actual]
-  (prn 'solve expected actual)
+(defn solve* [expected actual]
+  (prn 'solve* expected actual)
   (match [expected actual]
     [[::var _] _]
     (exec [? (bound-var? expected)]
       (if ?
         (exec [=type (deref-var expected)]
-          (solve =type actual))
+          (solve* =type actual))
         (bind-var expected actual)))
 
     [[::hole ?e-id] [::hole ?a-id]]
@@ -332,8 +336,8 @@
                    [=top-a =bottom-a] (match =interval-a
                                         [::interval =top =bottom]
                                         [=top =bottom])]
-             _ (solve =top-e =top-a)
-             _ (solve =bottom-a =bottom-e)
+             _ (solve* =top-e =top-a)
+             _ (solve* =bottom-a =bottom-e)
              _ (redirect-hole expected actual)]
         (return true)))
 
@@ -342,21 +346,20 @@
            :let [[=top =bottom] (match =interval
                                   [::interval =top =bottom]
                                   [=top =bottom])]]
-      (&util/parallel [(solve expected =top)
-                       (exec [_ (solve =top expected)
-                              _ (solve expected =bottom)
-                              =new-top ($and [expected =top])
+      (&util/parallel [(solve* expected =top)
+                       (exec [_ (solve* =top expected)
+                              _ (solve* expected =bottom)
+                              =new-top ($and expected =top)
                               _ (narrow-hole actual =new-top =bottom)]
                          (return true))]))
 
+    [[::ref _] _]
+    (exec [=type (get-ref expected)]
+      (solve* =type actual))
+
     [_ [::ref _]]
-    (exec [=type (get-ref actual)
-           :let [_ (prn "Current type:" =type)]
-           :let [_ (prn "ANDing" expected =type)]
-           =new-type ($and [expected =type])
-           :let [_ (prn "New type:" =new-type)]
-           _ (set-ref actual =new-type)]
-      (return true))
+    (exec [=type (get-ref actual)]
+      (solve* expected =type))
 
     ;; [[::var ?e-id] [::var ?a-id]]
     ;; (if (= ?e-id ?a-id)
@@ -402,20 +405,11 @@
     [[::any] _]
     (return true)
 
-    [_ [::any]]
-    zero
-
     [_ [::nothing]]
     (return true)
 
-    [[::nothing] _]
-    zero
-
     [[::nil] [::nil]]
     (return true)
-
-    [[::nil] _]
-    zero
 
     [[::literal ?e-class ?e-value] [::literal ?a-class ?a-value]]
     (if (and (= ?e-class ?a-class)
@@ -432,51 +426,53 @@
     [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
     (if (= ?e-class ?a-class)
       (exec [_ (map-m
-                (fn [[e a]] (solve e a))
+                (fn [[e a]] (solve* e a))
                 (map vector ?e-params ?a-params))]
         (return true))
       (exec [=actual (upcast ?e-class actual)]
-        (solve expected =actual)))
+        (solve* expected =actual)))
 
     [[::tuple ?e-parts] [::tuple ?a-parts]]
     (if (<= (count ?e-parts) (count ?a-parts))
       (exec [_ (map-m
-                (fn [[e a]] (solve e a))
+                (fn [[e a]] (solve* e a))
                 (map vector ?e-parts ?a-parts))]
         (return true))
       zero)
 
     [[::object ?e-class ?e-params] [::tuple ?a-parts]]
-    (exec [=elems (if (empty? ?a-parts)
-                    (return [::nothing])
-                    ($or ?a-parts))]
-      (solve expected [::object 'clojure.lang.IPersistentVector [=elems]]))
+    (exec [=elems (reduce-m $or [::nothing] ?a-parts)]
+      (solve* expected [::object 'clojure.lang.IPersistentVector [=elems]]))
     
     [[::object ?e-class ?e-params] [::record ?a-entries]]
     (exec [[=keys =vals] (if (empty? ?a-entries)
                            (return [[::nothing] [::nothing]])
-                           (exec [=keys ($or (keys ?a-entries))
-                                  =vals ($or (vals ?a-entries))]
+                           (exec [=keys (reduce-m $or [::nothing] (keys ?a-entries))
+                                  =vals (reduce-m $or [::nothing] (vals ?a-entries))]
                              (return [=keys =vals])))]
-      (solve expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
+      (solve* expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
     
     [[::record ?e-entries] [::record ?a-entries]]
     (if (set/superset? (set (keys ?e-entries)) (set (keys ?a-entries)))
       (exec [_ (map-m
-                (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
+                (fn [k] (solve* (get ?e-entries k) (get ?a-entries k)))
                 (keys ?e-entries))]
         (return true))
       zero)
 
     [[::union ?types] _]
     (exec [=type (return-all ?types)
-           _ (solve =type actual)]
+           _ (solve* =type actual)]
+      (return true))
+
+    [[::intersection ?filter] _]
+    (exec [_ (map-m #(solve* % actual) ?filter)]
       (return true))
 
     [[::complement ?type] _]
     (fn [state]
-      (if (and (empty? ((solve ?type actual) state))
-               (empty? ((solve actual ?type) state)))
+      (if (and (empty? ((solve* ?type actual) state))
+               (empty? ((solve* actual ?type) state)))
         (list [state true])
         (zero nil)))
 
@@ -485,6 +481,180 @@
 
     :else
     zero
+    ))
+
+(defn solve [expected actual]
+  (prn 'solve expected actual)
+  (match [expected actual]
+    [_ [::ref _]]
+    (exec [=type (get-ref actual)
+           :let [_ (prn "Current type:" =type)]
+           :let [_ (prn "ANDing" expected =type)]
+           =new-type ($and expected =type)
+           :let [_ (prn "New type:" =new-type)]
+           _ (set-ref actual =new-type)]
+      (return true))
+
+    :else
+    (solve* expected actual)
+
+    ;; [[::var _] _]
+    ;; (exec [? (bound-var? expected)]
+    ;;   (if ?
+    ;;     (exec [=type (deref-var expected)]
+    ;;       (solve =type actual))
+    ;;     (bind-var expected actual)))
+
+    ;; [[::hole ?e-id] [::hole ?a-id]]
+    ;; (if (= ?e-id ?a-id)
+    ;;   (return true)
+    ;;   (exec [=interval-e (get-hole expected)
+    ;;          =interval-a (get-hole actual)
+    ;;          :let [[=top-e =bottom-e] (match =interval-e
+    ;;                                     [::interval =top =bottom]
+    ;;                                     [=top =bottom])
+    ;;                [=top-a =bottom-a] (match =interval-a
+    ;;                                     [::interval =top =bottom]
+    ;;                                     [=top =bottom])]
+    ;;          _ (solve =top-e =top-a)
+    ;;          _ (solve =bottom-a =bottom-e)
+    ;;          _ (redirect-hole expected actual)]
+    ;;     (return true)))
+
+    ;; [_ [::hole _]]
+    ;; (exec [=interval (get-hole actual)
+    ;;        :let [[=top =bottom] (match =interval
+    ;;                               [::interval =top =bottom]
+    ;;                               [=top =bottom])]]
+    ;;   (&util/parallel [(solve expected =top)
+    ;;                    (exec [_ (solve =top expected)
+    ;;                           _ (solve expected =bottom)
+    ;;                           =new-top ($and expected =top)
+    ;;                           _ (narrow-hole actual =new-top =bottom)]
+    ;;                      (return true))]))
+
+    
+
+    ;; [[::var ?e-id] [::var ?a-id]]
+    ;; (if (= ?e-id ?a-id)
+    ;;   (return true)
+    ;;   (exec
+    ;;     [=interval-e (deref-var expected)
+    ;;      =interval-a (deref-var actual)
+    ;;      :let [[=top-e =bottom-e] (match =interval-e
+    ;;                                 [::interval =top =bottom]
+    ;;                                 [=top =bottom])
+    ;;            [=top-a =bottom-a] (match =interval-a
+    ;;                                 [::interval =top =bottom]
+    ;;                                 [=top =bottom])]
+    ;;      _ (solve =top-e =top-a)
+    ;;      _ (solve =bottom-a =bottom-e)
+    ;;      _ (update-var expected [::interval =top-a =bottom-a])]
+    ;;     (return true)))
+
+    ;; [[::var ?e-id] _]
+    ;; (exec
+    ;;   [=interval (deref-var expected)
+    ;;    :let [[=top =bottom] (match =interval
+    ;;                           [::interval =top =bottom]
+    ;;                           [=top =bottom])]
+    ;;    _ (solve =top actual)
+    ;;    _ (solve actual =bottom)
+    ;;    _ (update-var expected [::interval actual =bottom])]
+    ;;   (return true))
+    
+    ;; [_ [::var _]]
+    ;; (exec
+    ;;   [=interval (deref-var actual)
+    ;;    :let [[=top =bottom] (match =interval
+    ;;                           [::interval =top =bottom]
+    ;;                           [=top =bottom])]]
+    ;;   (&util/parallel [(solve expected =top)
+    ;;                    (exec
+    ;;                      [_ (solve =top expected)
+    ;;                       _ (solve expected =bottom)
+    ;;                       _ (update-var actual [::interval expected =bottom])]
+    ;;                      (return true))]))
+
+    ;; [[::any] _]
+    ;; (return true)
+
+    ;; [_ [::nothing]]
+    ;; (return true)
+
+    ;; [[::nil] [::nil]]
+    ;; (return true)
+
+    ;; [[::literal ?e-class ?e-value] [::literal ?a-class ?a-value]]
+    ;; (if (and (= ?e-class ?a-class)
+    ;;          (= ?e-value ?a-value))
+    ;;   (return true)
+    ;;   zero)
+
+    ;; [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
+    ;; (exec [? (super-class? ?class ?lit-class)]
+    ;;   (if ?
+    ;;     (return true)
+    ;;     zero))
+
+    ;; [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
+    ;; (if (= ?e-class ?a-class)
+    ;;   (exec [_ (map-m
+    ;;             (fn [[e a]] (solve e a))
+    ;;             (map vector ?e-params ?a-params))]
+    ;;     (return true))
+    ;;   (exec [=actual (upcast ?e-class actual)]
+    ;;     (solve expected =actual)))
+
+    ;; [[::tuple ?e-parts] [::tuple ?a-parts]]
+    ;; (if (<= (count ?e-parts) (count ?a-parts))
+    ;;   (exec [_ (map-m
+    ;;             (fn [[e a]] (solve e a))
+    ;;             (map vector ?e-parts ?a-parts))]
+    ;;     (return true))
+    ;;   zero)
+
+    ;; [[::object ?e-class ?e-params] [::tuple ?a-parts]]
+    ;; (exec [=elems (reduce-m $or [::nothing] ?a-parts)]
+    ;;   (solve expected [::object 'clojure.lang.IPersistentVector [=elems]]))
+    
+    ;; [[::object ?e-class ?e-params] [::record ?a-entries]]
+    ;; (exec [[=keys =vals] (if (empty? ?a-entries)
+    ;;                        (return [[::nothing] [::nothing]])
+    ;;                        (exec [=keys (reduce-m $or [::nothing] (keys ?a-entries))
+    ;;                               =vals (reduce-m $or [::nothing] (vals ?a-entries))]
+    ;;                          (return [=keys =vals])))]
+    ;;   (solve expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
+    
+    ;; [[::record ?e-entries] [::record ?a-entries]]
+    ;; (if (set/superset? (set (keys ?e-entries)) (set (keys ?a-entries)))
+    ;;   (exec [_ (map-m
+    ;;             (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
+    ;;             (keys ?e-entries))]
+    ;;     (return true))
+    ;;   zero)
+
+    ;; [[::union ?types] _]
+    ;; (exec [=type (return-all ?types)
+    ;;        _ (solve =type actual)]
+    ;;   (return true))
+
+    ;; [[::intersection ?filter] _]
+    ;; (exec [_ (map-m #(solve % actual) ?filter)]
+    ;;   (return true))
+
+    ;; [[::complement ?type] _]
+    ;; (fn [state]
+    ;;   (if (and (empty? ((solve ?type actual) state))
+    ;;            (empty? ((solve actual ?type) state)))
+    ;;     (list [state true])
+    ;;     (zero nil)))
+
+    ;; [[::io] [::io]]
+    ;; (return true)
+
+    ;; :else
+    ;; zero
     ))
 
 ;; Monads / Type-functions
@@ -559,159 +729,151 @@
 
 ;; Monads / Types
 (do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]
-  (letfn [(adder [base addition]
-            (match [base addition]
-              [_ [<tag> ?addition]]
-              (reduce-m adder base ?addition)
-              
-              [[<tag> ?base] _]
-              (exec [veredicts (map-m
-                                (fn [=base]
-                                  (&util/try-all [(exec [_ (solve =base addition)]
-                                                    (return <LT>))
-                                                  (exec [_ (solve addition =base)]
-                                                    (return <GT>))
-                                                  (return :peer)]))
-                                ?base)]
-                (cond (some (partial = :parent) veredicts)
-                      (return base)
+  (defn <fn> [base addition]
+    (prn '<fn> base addition)
+    (match [base addition]
+      [_ [<tag> ?addition]]
+      (reduce-m <fn> base ?addition)
+      
+      [[<tag> ?base] _]
+      (exec [veredicts (map-m (fn [=base]
+                                (&util/try-all [(exec [_ (solve* =base addition)]
+                                                  (return <LT>))
+                                                (exec [_ (solve* addition =base)]
+                                                  (return <GT>))
+                                                (return :peer)]))
+                              ?base)]
+        (cond (some (partial = :parent) veredicts)
+              (return base)
 
-                      (every? (partial = :peer) veredicts)
-                      (return [<tag> (conj ?base addition)])
+              (every? (partial = :peer) veredicts)
+              (return [<tag> (conj ?base addition)])
 
-                      :else
-                      (if-let [rem-types (->> (map vector ?base veredicts)
-                                              (filter (comp (partial not= :child) second))
-                                              (map first)
-                                              seq)]
-                        (return [<tag> (conj (vec rem-types) addition)])
-                        (return addition))))
-              
-              [_ _]
-              (&util/try-all [(exec [_ (solve base addition)]
-                                (return <LT-ret>))
-                              (exec [_ (solve addition base)]
-                                (return <GT-ret>))
-                              (return [<tag> [base addition]])])
-              ))]
-    (defn <fn> [types]
-      (match (vec types)
-        []
-        zero
-        
-        [type & others]
-        (reduce-m adder type others)
-        )))
+              :else
+              (if-let [rem-types (->> (map vector ?base veredicts)
+                                      (filter (comp (partial not= :child) second))
+                                      (map first)
+                                      seq)]
+                (return [<tag> (conj (vec rem-types) addition)])
+                (return addition))))
+      
+      [_ _]
+      (&util/try-all [(exec [_ (solve* base addition)
+                             :let [_ (prn "<LT>")]]
+                        (return <LT-ret>))
+                      (exec [_ (solve* addition base)
+                             :let [_ (prn "<GT>")]]
+                        (return <GT-ret>))
+                      (exec [_ (return nil)
+                             :let [_ (prn "<=/=>")]]
+                        (return [<tag> [base addition]]))])
+      ))
 
   $or  ::union        base     addition :parent :child
   ;; $and ::intersection addition base     :child  :parent
   )
 
-(letfn [(adder [base addition]
-          (match [base addition]
-            [_ [::union ?addition]]
-            (reduce-m (fn [=filter =refinement]
-                        (&util/try-all [(exec [_ (solve =filter =refinement)]
-                                          (return =refinement))
-                                        (exec [_ (solve =refinement =filter)]
-                                          (return =filter))
-                                        (exec [_ (return nil)]
-                                          (adder =filter =refinement))]))
-                      base
-                      ?addition)
+(defn $and [base addition]
+  (match [base addition]
+    [_ [::union ?addition]]
+    (reduce-m (fn [=filter =refinement]
+                (prn '[AND] =filter =refinement)
+                (&util/try-all [(exec [_ (solve* =filter =refinement)
+                                       :let [_ (prn "Case #1")]]
+                                  (return =refinement))
+                                (exec [_ (solve* =refinement =filter)
+                                       :let [_ (prn "Case #2")]]
+                                  (return =filter))
+                                (match [=filter =refinement]
+                                  [[::object ?filter _] [::object ?refinement _]]
+                                  (exec [?1 (interface? ?filter)
+                                         ?2 (interface? ?refinement)
+                                         :let [_ (prn "Case #3..." ?filter ?1 ?refinement ?2)]
+                                         :when (and ?1 ?2)
+                                         :let [_ (prn "Case #3")]]
+                                    ($and =filter =refinement))
+                                  
+                                  :else
+                                  (return =filter))]))
+              base
+              ?addition)
 
-            [_ [::intersection ?addition]]
-            (reduce-m adder base ?addition)
-            
-            [[::intersection ?base] _]
-            (exec [veredicts (map-m (fn [=base]
-                                      (&util/try-all [(exec [_ (solve =base addition)]
-                                                        (return :child))
-                                                      (exec [_ (solve addition =base)]
-                                                        (return :parent))
-                                                      (return :peer)]))
-                                    ?base)]
-              (cond (some (partial = :parent) veredicts)
-                    (return base)
+    [_ [::intersection ?addition]]
+    (reduce-m $and base ?addition)
+    
+    [[::intersection ?base] _]
+    (exec [veredicts (map-m (fn [=base]
+                              (&util/try-all [(exec [_ (solve* =base addition)]
+                                                (return :child))
+                                              (exec [_ (solve* addition =base)]
+                                                (return :parent))
+                                              (return :peer)]))
+                            ?base)]
+      (cond (some (partial = :parent) veredicts)
+            (return base)
 
-                    (every? (partial = :peer) veredicts)
-                    (return [::intersection (conj ?base addition)])
+            (every? (partial = :peer) veredicts)
+            (return [::intersection (conj ?base addition)])
 
-                    :else
-                    (if-let [rem-types (->> (map vector ?base veredicts)
-                                            (filter (comp (partial not= :child) second))
-                                            (map first)
-                                            seq)]
-                      (return [::intersection (conj (vec rem-types) addition)])
-                      (return addition))))
-            
-            [_ _]
-            (&util/try-all [(exec [_ (solve base addition)]
-                              (return addition))
-                            (exec [_ (solve addition base)]
-                              (return base))
-                            (return [::intersection [base addition]])])
-            ))]
-  (defn $and [types]
-    (prn '$and types)
-    (match (vec types)
-      []
-      zero
-      
-      [type & others]
-      (reduce-m adder type others)
-      )))
+            :else
+            (if-let [rem-types (->> (map vector ?base veredicts)
+                                    (filter (comp (partial not= :child) second))
+                                    (map first)
+                                    seq)]
+              (return [::intersection (conj (vec rem-types) addition)])
+              (return addition))))
+    
+    [_ _]
+    (&util/try-all [(exec [_ (solve* base addition)]
+                      (return addition))
+                    (exec [_ (solve* addition base)]
+                      (return base))
+                    (match [base addition]
+                      [[::object ?filter _] [::object ?refinement _]]
+                      (exec [?1 (interface? ?filter)
+                             ?2 (interface? ?refinement)
+                             :when (and ?1 ?2)]
+                        (return [::intersection [base addition]]))
+                      
+                      :else
+                      (return [::nothing]))])
+    ))
 
-(let [adder (fn [t1 t2]
-              (match [t1 t2]
-                [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
-                (exec [=effs (map-m
-                              (fn [key]
-                                (exec [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
-                                  (return [key =merged])))
-                              (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
-                  (return [::eff ?data-2 =effs]))
-                
-                [[::eff ?data-1 ?effs-1] _]
-                (return [::eff t2 ?effs-1])
-                
-                [_ _]
-                (return t2)
-                ))]
-  (defn sequentially-combine-types [types]
-    (match (vec types)
-      []
-      zero
+(defn sequential [t1 t2]
+  (match [t1 t2]
+    [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
+    (exec [=effs (map-m
+                  (fn [key]
+                    (exec [=merged (reduce-m $or [::nothing] (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
+                      (return [key =merged])))
+                  (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
+      (return [::eff ?data-2 =effs]))
+    
+    [[::eff ?data-1 ?effs-1] _]
+    (return [::eff t2 ?effs-1])
+    
+    [_ _]
+    (return t2)
+    ))
 
-      [?init & ?others]
-      (reduce-m adder ?init ?others))))
-
-(letfn [(adder [t1 t2]
-          (match [t1 t2]
-            [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
-            (exec [=data ($or [?data-1 ?data-2])
-                   =effs (map-m
-                          (fn [key]
-                            (exec [=merged ($or (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
-                              (return [key =merged])))
-                          (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
-              (return [::eff =data =effs]))
-            
-            [[::eff ?data-1 ?effs-1] _]
-            (exec [=data ($or [?data-1 t2])]
-              (return [::eff =data ?effs-1]))
-            
-            [_ [::eff ?data-2 ?effs-2]]
-            (exec [=data ($or [t1 ?data-2])]
-              (return [::eff =data ?effs-2]))
-            
-            [_ _]
-            ($or [t1 t2])
-            ))]
-  (defn parallel-combine-types [types]
-    (match (vec types)
-      []
-      zero
-
-      [?init & ?others]
-      (reduce-m adder ?init ?others))))
+(defn parallel [t1 t2]
+  (match [t1 t2]
+    [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
+    (exec [=data ($or ?data-1 ?data-2)
+           =effs (map-m (fn [key]
+                          (exec [=merged (reduce-m $or [::nothing] (filter identity (list (get ?effs-1 key) (get ?effs-2 key))))]
+                            (return [key =merged])))
+                        (set/union (set (keys ?effs-1)) (set (keys ?effs-2))))]
+      (return [::eff =data =effs]))
+    
+    [[::eff ?data-1 ?effs-1] _]
+    (exec [=data ($or ?data-1 t2)]
+      (return [::eff =data ?effs-1]))
+    
+    [_ [::eff ?data-2 ?effs-2]]
+    (exec [=data ($or t1 ?data-2)]
+      (return [::eff =data ?effs-2]))
+    
+    [_ _]
+    ($or t1 t2)
+    ))
