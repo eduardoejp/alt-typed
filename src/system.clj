@@ -363,6 +363,14 @@
                 (assert (map? x) "YOLO")
                 x))
 
+            ((All [[a < (java.lang.Map Any Any)]] [a -> a]))
+            (do (ann-class (java.lang.Map key val) [java.lang.Object])
+              (ann map? (Fn [(java.lang.Map Any Any) -> true]
+                            [(Not (java.lang.Map Any Any)) -> false]))
+              (fn [x]
+                (assert (map? x) "YOLO")
+                x))
+
             ((All [a b] [[a -> b] a -> b]))
             (fn _ [f x]
               (f x))
@@ -451,6 +459,9 @@
   ;; MISSING: pre-post conditions.
   ;; MISSING: ^Class #^type-tags
   ;; MISSING: 
+
+  
+  
   
   (run '(do (ann class (All [c] [c -> (java.lang.Class c)]))
           (defmulti obj->string class)

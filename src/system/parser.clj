@@ -422,9 +422,13 @@
                                [::&types/all {} (vec args) [::&types/alias name *type-def]])]]
         (return [::defalias name *type-def])))
 
-    (['fn ?local-name (?args :guard vector?) & ?body] :seq)
+    (['fn (?local-name :guard symbol?) (?args :guard vector?) & ?body] :seq)
     (exec [*body (parse `(do ~@ ?body))]
       (return [::fn ?local-name ?args *body]))
+
+    (['fn (?args :guard vector?) & ?body] :seq)
+    (exec [*body (parse `(do ~@ ?body))]
+      (return [::fn nil ?args *body]))
 
     ([?fn & ?args] :seq)
     (exec [*fn (parse ?fn)

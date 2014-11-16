@@ -641,13 +641,16 @@
       (check* ?body))
     
     [::&parser/fn ?local-name ?args ?body]
-    (exec [worlds (&util/collect (exec [=fn (&util/with-field :types
-                                              &type/fresh-hole)
-                                        =args (map-m (fn [_]
+    (exec [worlds (&util/collect (exec [=args (map-m (fn [_]
                                                        (&util/with-field :types
                                                          &type/fresh-hole))
                                                      ?args)
-                                        =return (with-env* {?local-name =fn}
+                                        =return (if ?local-name
+                                                  (exec [=fn (&util/with-field :types
+                                                               &type/fresh-hole)]
+                                                    (with-env* {?local-name =fn}
+                                                      (with-env* (into {} (map vector ?args =args))
+                                                        (check* ?body))))
                                                   (with-env* (into {} (map vector ?args =args))
                                                     (check* ?body)))]
                                    (generalize-arity [::&type/arity =args =return])))]
