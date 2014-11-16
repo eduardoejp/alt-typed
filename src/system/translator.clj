@@ -56,6 +56,10 @@
     (if (= 1 (count ?arities))
       (type->code (first ?arities))
       `(~'Fn ~@(map type->code ?arities)))
+
+    [::&type/multi-fn ?dispatch-fn ?methods]
+    `(~'MultiFn ~(type->code ?dispatch-fn) ~'=>
+                ~(mapv type->code ?methods))
     
     [::&type/all ?env ?vars ?poly]
     (let [vars* (mapv #(match %

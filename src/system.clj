@@ -420,26 +420,55 @@
             (do (ann only-exs (All [[x < java.lang.Exception]] [x -> x]))
               (fn _ [x]
                 (only-exs x)))
+
+            ((MultiFn (All [[c < java.lang.Object]] [c -> (java.lang.Class c)]) =>
+                      [[java.lang.Object -> "It's a string!"]]))
+            (do (ann class (All [[c < java.lang.Object]]
+                                [c -> (java.lang.Class c)]))
+              (defmulti obj->string class)
+              (defmethod obj->string java.lang.String [_]
+                "It's a string!")
+              obj->string)
+
+            
             )))
 
-  (run '(do (ann only-exs (All [x] [x -> x]))
-          (fn _ [x]
-            (only-exs x))))
-  
   ;; MISSING: Recursive types
+  ;; MISSING: Primitive types.
   ;; MISSING: Arrays and Xor types
-  ;; MISSING: Destructuring
   ;; MISSING: def(protocol|type|record), proxy & reify
   ;; MISSING: multimethods
   ;; MISSING: gen-class
+  ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.
   ;; MISSING: var-args
   ;; MISSING: macro-expansion.
   ;; MISSING: Scope handling (public vs private)
+  ;; MISSING: set! special form.
   ;; MISSING: Pre-inference annotating.
   ;; MISSING: Solving functions
   ;; MISSING: Error messages.
+  ;; MISSING: pre-post conditions.
+  ;; MISSING: ^Class #^type-tags
   ;; MISSING: 
+  
+  (run '(do (ann class (All [c] [c -> (java.lang.Class c)]))
+          (defmulti obj->string class)
+          (defmethod obj->string java.lang.String [_]
+            "It's a string!")
+          obj->string))
+
+  (run '(do (ann class (All [c] [c -> (java.lang.Class c)]))
+          (defmulti obj->string class)
+          (defmethod obj->string java.lang.String [_]
+            "It's a string!")
+          (obj->string "yolo")))
+
+  (run '(do (ann class (All [c] [c -> (java.lang.Class c)]))
+          (defmulti obj->string class)
+          (defmethod obj->string java.lang.String [_]
+            "It's a string!")
+          (obj->string :yolo)))
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.

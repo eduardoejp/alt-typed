@@ -117,15 +117,23 @@
                      (&type/normalize-hole type))]
         (if-let [var-name (get mappings =type)]
           (return var-name)
+          ;; (exec [[=top =bottom] (&util/with-field :types
+          ;;                         (&type/get-hole =type))
+          ;;        ;; =top (prettify-type mappings =top)
+          ;;        ;; =bottom (prettify-type mappings =bottom)
+          ;;        ;; _ (&util/with-field :types
+          ;;        ;;     (&type/narrow-hole type =top =bottom))
+          ;;        ]
+          ;;   ;; (return type)
+          ;;   (prettify-type mappings =top))
           (exec [[=top =bottom] (&util/with-field :types
                                   (&type/get-hole =type))
-                 ;; =top (prettify-type mappings =top)
-                 ;; =bottom (prettify-type mappings =bottom)
-                 ;; _ (&util/with-field :types
-                 ;;     (&type/narrow-hole type =top =bottom))
-                 ]
-            ;; (return type)
-            (prettify-type mappings =top)))))
+                 :let [_ (prn 'Prettifying =type =top =bottom)]]
+            (if (and (= [::&type/any] =top)
+                     (not= [::&type/nothing] =bottom))
+              (prettify-type mappings =bottom)
+              (prettify-type mappings =top)))
+          )))
     
     [::&type/object ?class ?params]
     (exec [=params (map-m (partial prettify-type mappings) ?params)]
@@ -156,7 +164,8 @@
   (match type
     [::&type/hole _]
     (exec [[=top =bottom] (&util/with-field :types
-                            (&type/get-hole type))]
+                            (&type/get-hole type))
+           :let [_ (prn 'Grounding type =top =bottom)]]
       (if (and (= [::&type/any] =top)
                (not= [::&type/nothing] =bottom))
         (ground-type =bottom)
@@ -360,10 +369,17 @@
                               (&type/member-candidates [(-> ?symbol name symbol) :static-fields]))
              :when (= class (symbol ns))]
         (return =field))
-      (exec [=symbol (&util/with-field :env
-                       (&env/resolve ?symbol))
-             :when (not= [::&type/macro] =symbol)]
-        (return =symbol)))
+      (&util/try-all [(exec [=symbol (&util/with-field :env
+                                       (&env/resolve ?symbol))
+                             :when (not= [::&type/macro] =symbol)]
+                        (return =symbol))
+                      (exec [? (&util/with-field :types
+                                 (&type/class-defined? ?symbol))
+                             :when ?
+                             =inner (&util/with-field :types
+                                      (&type/instantiate* ?symbol))]
+                        (&util/with-field :types
+                          (&type/instantiate* 'java.lang.Class [=inner])))]))
     
     [::&parser/do & ?forms]
     (exec [=forms (map-m (fn [?form]
@@ -550,6 +566,51 @@
     [::&parser/catch ?class ?label ?body]
     (with-env {?label [::&type/object ?class []]}
       (check* ?body))
+
+    [::&parser/defmulti ?name ?dispatch-fn]
+    (exec [=dispatch-fn (check* ?dispatch-fn)
+           ;; :let [_ (prn "#1")]
+           :let [=multi-fn [::&type/multi-fn =dispatch-fn []]]
+           ;; :let [_ (prn "#2")]
+           _ (&util/with-field :env
+               (&env/intern ?name =multi-fn))
+           ;; :let [_ (prn "#3")]
+           ]
+      (&util/with-field :types
+        (&type/instantiate* 'clojure.lang.Var [=multi-fn])))
+
+    [::&parser/defmethod ?name ?dispatch-val ?args ?body]
+    (exec [=multi-fn (check* [::&parser/symbol ?name])
+           :let [_ (prn "#1" =multi-fn)]]
+      (match =multi-fn
+        [::&type/multi-fn ?dispatch-fn ?methods]
+        (exec [=args (&util/with-field :types
+                       (map-m (constantly &type/fresh-hole) ?args))
+               :let [_ (prn "#2")]
+               =dispatch-val (check* ?dispatch-val)
+               :let [_ (prn "#3")]
+               =return (fn-call ?dispatch-fn =args)
+               :let [_ (prn "#4")]
+               _ (&util/with-field :types
+                   (&type/solve =return =dispatch-val))
+               :let [_ (prn "#5" =return =dispatch-val =args)]
+               worlds (&util/collect (exec [=return (with-env* (into {} (map vector ?args =args))
+                                                      (check* ?body))]
+                                       (generalize-arity [::&type/arity =args =return])))
+               :let [_ (prn "#6")]
+               =new-multi-fn (if (empty? worlds)
+                               zero
+                               (exec [=arities (&util/collect (merge-arities worlds))
+                                      :let [=new-multi-fn [::&type/multi-fn ?dispatch-fn (into ?methods (map second =arities))]]
+                                      _ (&util/with-field :env
+                                          (&env/intern ?name =new-multi-fn))]
+                                 (return =new-multi-fn)))
+               :let [_ (prn "#7")]]
+          (&util/with-field :types
+            (&type/instantiate* 'clojure.lang.Var [=new-multi-fn])))
+
+        :else
+        zero))
     
     [::&parser/monitor-enter ?object]
     (exec [=object (check* ?object)

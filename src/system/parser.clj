@@ -357,6 +357,16 @@
     (exec [*body (parse `(do ~@ ?body))]
       (return [::catch ?class ?var *body]))
 
+    (['defmulti (?name :guard symbol?) ?dispatch-fn] :seq)
+    (exec [*dispatch-fn (parse ?dispatch-fn)]
+      (return [::defmulti ?name *dispatch-fn]))
+
+    (['defmethod (?name :guard symbol?) ?dispatch-val ?args & ?body] :seq)
+    (exec [*dispatch-val (parse ?dispatch-val)
+           *args (map-m parse ?args)
+           *body (parse `(do ~@ ?body))]
+      (return [::defmethod ?name *dispatch-val ?args *body]))
+
     (['monitor-enter ?object] :seq)
     (exec [*object (parse ?object)]
       (return [::monitor-enter *object]))

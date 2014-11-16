@@ -132,6 +132,12 @@
       (list [state true])
       '())))
 
+(defn class-defined? [class]
+  (fn [^Types state]
+    (if (-> state .-class-categories (contains? class))
+      (list [state true])
+      (list [state false]))))
+
 (defn define-class-members [class all-members]
   (exec [=class (resolve class)
          :let [wrap (match =class
@@ -200,6 +206,9 @@
   (match [target-type type]
     [::$fn [::function ?arities]]
     (return type)
+
+    [::$fn [::multi-fn _ ?arities]]
+    (return [::function ?arities])
 
     [::$fn [::literal 'clojure.lang.Keyword _]]
     (return [::function (list [::arity (list [::object 'Map []]) [::any]])])
@@ -302,9 +311,8 @@
 
     [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
     (if (= ?e-class ?a-class)
-      (exec [_ (map-m
-                (fn [[e a]] (solve e a))
-                (map vector ?e-params ?a-params))]
+      (exec [_ (map-m (fn [[e a]] (solve e a))
+                      (map vector ?e-params ?a-params))]
         (return true))
       (exec [=actual (upcast ?e-class actual)]
         (solve expected =actual)))
@@ -452,11 +460,23 @@
     :else
     false))
 
-(defn instantiate* [name params]
-  (exec [=type-fn (resolve name)]
-    (if (type-fn? =type-fn)
-      (apply =type-fn params)
-      (return =type-fn))))
+(defn multi-fn? [type]
+  (match type
+    [::multi-fn _ _]
+    true
+    
+    :else
+    false))
+
+(defn instantiate*
+  ([name]
+     (exec [=type-fn (resolve name)]
+       (instantiate =type-fn)))
+  ([name params]
+     (exec [=type-fn (resolve name)]
+       (if (type-fn? =type-fn)
+         (apply =type-fn params)
+         (return =type-fn)))))
 
 ;; Monads / Types
 (do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]

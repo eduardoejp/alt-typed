@@ -12,6 +12,7 @@
   (exec [_ (&util/with-field :env
              (&env/in-ns 'java.lang))
          parsed-code (&parser/parse '(do (ann-class java.lang.Object [])
+                                       (ann-class (java.lang.Class x) [java.lang.Object])
                                        (ann-class java.lang.String [java.lang.Object])
                                        (ann-class java.lang.Number [java.lang.Object])
                                        (ann-class java.lang.Boolean [java.lang.Object])
