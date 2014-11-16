@@ -668,9 +668,9 @@
                                                     (exec [=fn (&util/with-field :types
                                                                  &type/fresh-hole)]
                                                       (with-env* {?local-name =fn}
-                                                        (with-env* (into {} (map vector ?args =args))
+                                                        (with-env* (into {::recur =args} (map vector ?args =args))
                                                           (check* ?body))))
-                                                    (with-env* (into {} (map vector ?args =args))
+                                                    (with-env* (into {::recur =args} (map vector ?args =args))
                                                       (check* ?body)))
                                           _ (with-env* {'% =return}
                                               (map-m check* all-post))

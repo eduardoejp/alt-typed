@@ -460,6 +460,20 @@
             ((All [[a < java.lang.String]] [a -> a]))
             (fn [^java.lang.String x]
               x)
+
+            ((All [[a < java.lang.Long]] [a -> a]))
+            (do (ann inc [java.lang.Long -> java.lang.Long])
+              (ann = [Any Any -> java.lang.Boolean])
+              (fn [a]
+                (if (= 10 a)
+                  a
+                  (recur (inc a)))))
+
+            ([java.lang.Long -> Nothing])
+            (do (ann inc [java.lang.Long -> java.lang.Long])
+              (ann = [Any Any -> java.lang.Boolean])
+              (fn [a]
+                (recur (inc a))))
             )))
 
   ;; MISSING: Recursive types
@@ -501,11 +515,11 @@
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
+  ;; Gotta make holes on check*, instead of on ::let
   (run '(do (ann get-object [-> java.lang.Object])
-          (ann use-case (Fn [String -> :yolo]
-                            [Integer -> :lol]
-                            [Boolean -> :meme]
-                            [Any -> :meme]))
+          (ann use-case (Fn [java.lang.String -> :yolo]
+                            [java.lang.Integer -> :lol]
+                            [java.lang.Boolean -> :meme]))
           (fn foo []
             (use-case (get-object)))))
 
@@ -522,7 +536,6 @@
           yolo
           ))
 
-  ;; TODO: Allow recur to work with fn.
   ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
   ;; TODO: Move polymorphism from functions to arities.
   ;; TODO: 

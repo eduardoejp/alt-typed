@@ -273,6 +273,7 @@
 
     [_ [::hole _]]
     (exec [[=top =bottom] (get-hole actual)
+           :when (not= [::nothing] expected)
            =new-top ($and expected =top)
            ;; :let [_ (prn '=new-top =top expected =new-top)]
            ;; :when (not= [::nothing] =new-top)
@@ -282,6 +283,7 @@
 
     [[::hole _] _]
     (exec [[=top =bottom] (get-hole expected)
+           :when (not= [::any] actual)
            =new-bottom ($or actual =bottom)
            ;; :let [_ (prn '=new-bottom =bottom actual =new-bottom)]
            _ (solve =top =new-bottom)
