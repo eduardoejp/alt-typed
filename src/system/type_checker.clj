@@ -641,27 +641,43 @@
       (check* ?body))
     
     [::&parser/fn ?local-name ?args ?body]
-    (exec [worlds (&util/collect (exec [=args (map-m (fn [_]
-                                                       (&util/with-field :types
-                                                         &type/fresh-hole))
-                                                     ?args)
-                                        =return (if ?local-name
-                                                  (exec [=fn (&util/with-field :types
-                                                               &type/fresh-hole)]
-                                                    (with-env* {?local-name =fn}
-                                                      (with-env* (into {} (map vector ?args =args))
-                                                        (check* ?body))))
-                                                  (with-env* (into {} (map vector ?args =args))
-                                                    (check* ?body)))]
-                                   (generalize-arity [::&type/arity =args =return])))]
-      (case (count worlds)
-        0 zero
-        1 (exec [=arity (&util/spread worlds)]
-            (return [::&type/function (list =arity)]))
-        ;; else
-        (exec [=arities (&util/collect (merge-arities worlds))]
-          (return [::&type/function (map second =arities)]))))
-
+    (let [[pre-post ?body] (match ?body
+                             [::&parser/do ?pre-post & ?forms]
+                             (if (and (map? ?pre-post)
+                                      (or (contains? ?pre-post :pre)
+                                          (contains? ?pre-post :post)))
+                               [?pre-post `[::&parser/do ~@?forms]]
+                               [nil ?body]))]
+      (exec [all-pre (map-m #(&parser/parse `(~'assert ~%)) (:pre pre-post))
+             :let [_ (prn 'all-pre all-pre)]
+             all-post (map-m #(&parser/parse `(~'assert ~%)) (:post pre-post))
+             :let [_ (prn 'all-post all-post)]
+             worlds (&util/collect (exec [=args (&util/with-field :types
+                                                  (map-m (constantly &type/fresh-hole) ?args))
+                                          :let [_ (println "Post =args")]
+                                          _ (with-env* (into {} (map vector ?args =args))
+                                              (map-m check* all-pre))
+                                          :let [_ (println "#1")]
+                                          =return (if ?local-name
+                                                    (exec [=fn (&util/with-field :types
+                                                                 &type/fresh-hole)]
+                                                      (with-env* {?local-name =fn}
+                                                        (with-env* (into {} (map vector ?args =args))
+                                                          (check* ?body))))
+                                                    (with-env* (into {} (map vector ?args =args))
+                                                      (check* ?body)))
+                                          _ (with-env* {'% =return}
+                                              (map-m check* all-post))
+                                          :let [_ (println "#2")]]
+                                     (generalize-arity [::&type/arity =args =return])))]
+        (case (count worlds)
+          0 zero
+          1 (exec [=arity (&util/spread worlds)]
+              (return [::&type/function (list =arity)]))
+          ;; else
+          (exec [=arities (&util/collect (merge-arities worlds))]
+            (return [::&type/function (map second =arities)])))))
+    
     [::&parser/ann ?var ?type]
     (exec [_ (&util/with-field :env
                (&env/intern ?var ?type))]

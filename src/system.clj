@@ -438,7 +438,24 @@
                 "It's a string!")
               obj->string)
 
-            
+            ((All [[a < (java.lang.Map Any Any)]] [a -> a]))
+            (do (ann-class (java.lang.Map key val) [java.lang.Object])
+              (ann map? (Fn [(java.lang.Map Any Any) -> true]
+                            [(Not (java.lang.Map Any Any)) -> false]))
+              (fn [x]
+                {:pre [(map? x)]}
+                x))
+
+            ((All [[a < (java.lang.Map java.lang.String Any)]] [a -> a]))
+            (do (ann-class (java.lang.Map key val) [java.lang.Object])
+              (ann map? (Fn [(java.lang.Map Any Any) -> true]
+                            [(Not (java.lang.Map Any Any)) -> false]))
+              (ann string-map? (Fn [(java.lang.Map java.lang.String Any) -> true]
+                                   [(Not (java.lang.Map Any Any)) -> false]))
+              (fn [x]
+                {:pre [(map? x)]
+                 :post [(string-map? %)]}
+                x))
             )))
 
   ;; MISSING: Recursive types
@@ -456,11 +473,9 @@
   ;; MISSING: Pre-inference annotating.
   ;; MISSING: Solving functions
   ;; MISSING: Error messages.
-  ;; MISSING: pre-post conditions.
   ;; MISSING: ^Class #^type-tags
   ;; MISSING: 
 
-  
   
   
   (run '(do (ann class (All [c] [c -> (java.lang.Class c)]))
@@ -506,6 +521,7 @@
 
   ;; TODO: Allow recur to work with fn.
   ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
+  ;; TODO: Move polymorphism from functions to arities.
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
