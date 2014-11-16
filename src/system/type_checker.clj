@@ -396,7 +396,7 @@
                              (return [?local =value]))
            ;; :let [_ (prn ::&parser/let '[?label =value] [?label =value])]
            =binding (&util/with-field :types
-                      (exec [=hole &type/fresh-hole
+                      (exec [=hole (&type/fresh-var ?label)
                              _ (&type/narrow-hole =hole =value [::&type/nothing])]
                         (return =hole)))
            ;; :let [_ (prn ::&parser/let '=binding =binding)]
@@ -475,7 +475,7 @@
                                    =hole (&util/with-field :types
                                            (exec [=hole &type/fresh-hole
                                                   _ (&type/narrow-hole =hole [::&type/any] =top)
-                                                  [=top* =bottom*] (&type/get-hole =hole)
+                                                  ;; [=top* =bottom*] (&type/get-hole =hole)
                                                   ;; :let [_ (prn ::&parser/loop =hole [=top* =bottom*])]
                                                   ]
                                              (return =hole)))]
@@ -515,6 +515,12 @@
     (exec [=value (if ?value
                     (check* ?value)
                     (return [::&type/nothing]))
+           _ (&util/with-field :types
+               (if-let [tag (-> ?var meta :tag)]
+                 (exec [=tag (&type/instantiate* tag)
+                        _ (&type/solve =tag =value)]
+                   (return nil))
+                 (return nil)))
            _ (&util/with-field :env
                (&env/intern ?var =value))]
       (&util/with-field :types
@@ -653,7 +659,7 @@
              all-post (map-m #(&parser/parse `(~'assert ~%)) (:post pre-post))
              :let [_ (prn 'all-post all-post)]
              worlds (&util/collect (exec [=args (&util/with-field :types
-                                                  (map-m (constantly &type/fresh-hole) ?args))
+                                                  (map-m &type/fresh-var ?args))
                                           :let [_ (println "Post =args")]
                                           _ (with-env* (into {} (map vector ?args =args))
                                               (map-m check* all-pre))

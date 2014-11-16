@@ -456,6 +456,10 @@
                 {:pre [(map? x)]
                  :post [(string-map? %)]}
                 x))
+
+            ((All [[a < java.lang.String]] [a -> a]))
+            (fn [^java.lang.String x]
+              x)
             )))
 
   ;; MISSING: Recursive types
@@ -473,7 +477,6 @@
   ;; MISSING: Pre-inference annotating.
   ;; MISSING: Solving functions
   ;; MISSING: Error messages.
-  ;; MISSING: ^Class #^type-tags
   ;; MISSING: 
 
   

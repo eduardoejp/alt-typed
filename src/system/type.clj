@@ -478,6 +478,14 @@
          (apply =type-fn params)
          (return =type-fn)))))
 
+(defn fresh-var [arg]
+  (exec [=hole fresh-hole]
+    (if-let [tag (-> arg meta :tag)]
+      (exec [=tag (instantiate* tag)
+             _ (solve =tag =hole)]
+        (return =hole))
+      (return =hole))))
+
 ;; Monads / Types
 (do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]
   (defn <fn> [base addition]
