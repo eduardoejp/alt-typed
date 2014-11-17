@@ -53,9 +53,7 @@
     `[~@(map type->code ?args) ~'-> ~(type->code ?return)]
     
     [::&type/function ?arities]
-    (if (= 1 (count ?arities))
-      (type->code (first ?arities))
-      `(~'Fn ~@(map type->code ?arities)))
+    `(~'Fn ~@(map type->code ?arities))
 
     [::&type/multi-fn ?dispatch-fn ?methods]
     `(~'MultiFn ~(type->code ?dispatch-fn) ~'=>

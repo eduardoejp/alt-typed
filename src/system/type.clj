@@ -467,7 +467,8 @@
       <type> true
       :else  false))
   type-fn?  [::all _ _ _]
-  multi-fn? [::multi-fn _ _])
+  multi-fn? [::multi-fn _ _]
+  type-var? [::hole _])
 
 (defn instantiate*
   ([name]
@@ -653,23 +654,20 @@
     ))
 
 (letfn [(check-arity [=arity =args]
-          (match =arity
-            [::arity ?args ?return]
-            (exec [_ (map-m (fn [[arg input]]
-                              (solve arg input))
-                            (map vector ?args =args))]
-              (return ?return))))]
+          (exec [=arity (instantiate =arity)]
+            (match =arity
+              [::arity ?args ?return]
+              (exec [:when (= (count ?args) (count =args))
+                     _ (map-m (fn [[arg input]]
+                                (solve arg input))
+                              (map vector ?args =args))]
+                (return ?return)))))]
   (defn fn-call [=fn =args]
     ;; (prn 'fn-call =fn =args)
-    (exec [=fn (exec [=fn (instantiate =fn)]
-                 (if (type-fn? =fn)
-                   (fn-call =fn =args)
-                   (upcast ::$fn =fn)))]
+    (exec [=fn (upcast ::$fn =fn)]
       (match =fn
         [::function ?arities]
-        (exec [=arity (return-all (for [[_ args _ :as arity] ?arities
-                                        :when (= (count args) (count =args))]
-                                    arity))]
+        (exec [=arity (return-all ?arities)]
           (check-arity =arity =args))))))
 
 (defn holes [type]

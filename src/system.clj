@@ -104,7 +104,7 @@
                   result
                   "YOLO")))
 
-            ((All [a] [a -> a]))
+            ((Fn (All [a] [a -> a])))
             (fn id [x] x)
 
             ('[])
@@ -119,12 +119,12 @@
             ('[:klk "YOLO"])
             [:klk "YOLO"]
             
-            ([java.lang.String -> (Or nil java.lang.Long)])
-            (do (ann parse-int [java.lang.String -> (Or nil java.lang.Long)])
+            ((Fn [java.lang.String -> (Or nil java.lang.Long)]))
+            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
               (fn foo [x]
                 (parse-int x)))
 
-            ([java.lang.String -> (Or java.lang.Long "YOLO")])
+            ((Fn [java.lang.String -> (Or java.lang.Long "YOLO")]))
             (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
               (fn foo [x]
                 (let [result (parse-int x)]
@@ -285,13 +285,13 @@
               a)
 
             (java.lang.Long)
-            (do (ann + [java.lang.Long java.lang.Long -> java.lang.Long])
+            (do (ann + (Fn [java.lang.Long java.lang.Long -> java.lang.Long]))
               (loop [a 10
                      b 20]
                 (+ a b)))
 
             (Nothing)
-            (do (ann inc [java.lang.Long -> java.lang.Long])
+            (do (ann inc (Fn [java.lang.Long -> java.lang.Long]))
               (loop [a 0]
                 (recur (inc a))))
 
@@ -303,47 +303,47 @@
             (do (ann defn Macro)
               10)
 
-            ([Map -> Any])
+            ((Fn [Map -> Any]))
             (fn _ [x]
               (:yolo x))
 
             (java.lang.String)
             (do (ann-class java.lang.Collection [java.lang.Object])
               (ann-class java.lang.Map [java.lang.Collection])
-              (ann get-map [-> java.lang.Map])
-              (ann coll->str [java.lang.Collection -> java.lang.String])
+              (ann get-map (Fn [-> java.lang.Map]))
+              (ann coll->str (Fn [java.lang.Collection -> java.lang.String]))
               (coll->str (get-map)))
 
             ('{:a 10 :b "YOLO"})
             {:a 10 :b "YOLO"}
 
             ("YOLO")
-            (do (ann identity (All [x] [x -> x]))
+            (do (ann identity (Fn (All [x] [x -> x])))
               (identity "YOLO"))
 
             (java.lang.String)
             (do (ann-class (java.lang.Collection x) [java.lang.Object])
               (ann-class (java.lang.KV key val) [java.lang.Object])
               (ann-class (java.lang.Map key val) [(java.lang.Collection (java.lang.KV key val))])
-              (ann get-map [-> (java.lang.Map java.lang.String java.lang.Integer)])
-              (ann coll->str (All [key val]
-                                  [(java.lang.Collection (java.lang.KV key val)) -> java.lang.String]))
+              (ann get-map (Fn [-> (java.lang.Map java.lang.String java.lang.Integer)]))
+              (ann coll->str (Fn (All [key val]
+                                      [(java.lang.Collection (java.lang.KV key val)) -> java.lang.String])))
               (coll->str (get-map)))
 
             ((java.lang.Collection (java.lang.KV java.lang.String java.lang.Integer)))
             (do (ann-class (java.lang.Collection x) [java.lang.Object])
               (ann-class (java.lang.KV key val) [java.lang.Object])
               (ann-class (java.lang.Map key val) [(java.lang.Collection (java.lang.KV key val))])
-              (ann get-map [-> (java.lang.Map java.lang.String java.lang.Integer)])
-              (ann ->coll (All [key val elem]
-                               [(java.lang.Map key val) -> (java.lang.Collection (java.lang.KV key val))]))
+              (ann get-map (Fn [-> (java.lang.Map java.lang.String java.lang.Integer)]))
+              (ann ->coll (Fn (All [key val elem]
+                                   [(java.lang.Map key val) -> (java.lang.Collection (java.lang.KV key val))])))
               (->coll (get-map)))
 
-            ([java.lang.Long -> java.lang.Double])
+            ((Fn [java.lang.Long -> java.lang.Double]))
             (fn _ [x]
               (. x (doubleValue)))
             
-            ([java.lang.Long -> java.lang.Long])
+            ((Fn [java.lang.Long -> java.lang.Long]))
             (fn _ [x]
               (. x value))
 
@@ -356,7 +356,7 @@
             (java.lang.Long)
             (new java.lang.Long "YOLO")
 
-            ((All [[a < (java.lang.Map Any Any)]] [a -> a]))
+            ((Fn (All [[a < (java.lang.Map Any Any)]] [a -> a])))
             (do (ann-class (java.lang.Map key val) [java.lang.Object])
               (ann map? (Fn [(java.lang.Map Any Any) -> true]
                             [(Not (java.lang.Map Any Any)) -> false]))
@@ -364,7 +364,7 @@
                 (assert (map? x) "YOLO")
                 x))
 
-            ((All [[a < (java.lang.Map Any Any)]] [a -> a]))
+            ((Fn (All [[a < (java.lang.Map Any Any)]] [a -> a])))
             (do (ann-class (java.lang.Map key val) [java.lang.Object])
               (ann map? (Fn [(java.lang.Map Any Any) -> true]
                             [(Not (java.lang.Map Any Any)) -> false]))
@@ -372,34 +372,34 @@
                 (assert (map? x) "YOLO")
                 x))
 
-            ((All [a b] [[a -> b] a -> b]))
+            ((Fn (All [a b] [(Fn [a -> b]) a -> b])))
             (fn _ [f x]
               (f x))
 
             (java.lang.Long)
-            (do (ann inc [java.lang.Long -> java.lang.Long])
-              (ann = [Any Any -> java.lang.Boolean])
+            (do (ann inc (Fn [java.lang.Long -> java.lang.Long]))
+              (ann = (Fn [Any Any -> java.lang.Boolean]))
               (loop [a 0]
                 (if (= 10 a)
                   a
                   (recur (inc a)))))
 
             (java.lang.Long)
-            (do (ann inc [java.lang.Long -> java.lang.Long])
-              (ann = [Any Any -> java.lang.Boolean])
+            (do (ann inc (Fn [java.lang.Long -> java.lang.Long]))
+              (ann = (Fn [Any Any -> java.lang.Boolean]))
               (loop [a 0]
                 (if (= 10 a)
                   (recur (inc a))
                   a)))
 
             ((Eff Nothing {:try java.lang.Exception}))
-            (do (ann ex [-> java.lang.Exception])
+            (do (ann ex (Fn [-> java.lang.Exception]))
               (if true
                 (throw (ex))
                 :else))
 
             (:else)
-            (do (ann ex [-> java.lang.Exception])
+            (do (ann ex (Fn [-> java.lang.Exception]))
               (if false
                 (throw (ex))
                 :else))
@@ -419,27 +419,26 @@
                 :else
                 (throw ex)))
 
-            ([java.lang.Exception -> :yolo])
-            (do (ann only-exs (All [[x < java.lang.Exception]] [x -> x]))
+            ((Fn [java.lang.Exception -> :yolo]))
+            (do (ann only-exs (Fn (All [[x < java.lang.Exception]] [x -> x])))
               (fn _ [x]
                 (only-exs x)
                 :yolo))
 
-            ((All [[a < java.lang.Exception]] [a -> a]))
-            (do (ann only-exs (All [[x < java.lang.Exception]] [x -> x]))
+            ((Fn (All [[a < java.lang.Exception]] [a -> a])))
+            (do (ann only-exs (Fn (All [[x < java.lang.Exception]] [x -> x])))
               (fn _ [x]
                 (only-exs x)))
 
-            ((MultiFn (All [[c < java.lang.Object]] [c -> (java.lang.Class c)]) =>
-                      [[java.lang.Object -> "It's a string!"]]))
-            (do (ann class (All [[c < java.lang.Object]]
-                                [c -> (java.lang.Class c)]))
+            ((MultiFn (Fn (All [c] [c -> (java.lang.Class c)])) =>
+                      [[Any -> "It's a string!"]]))
+            (do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
               (defmulti obj->string class)
               (defmethod obj->string java.lang.String [_]
                 "It's a string!")
               obj->string)
 
-            ((All [[a < (java.lang.Map Any Any)]] [a -> a]))
+            ((Fn (All [[a < (java.lang.Map Any Any)]] [a -> a])))
             (do (ann-class (java.lang.Map key val) [java.lang.Object])
               (ann map? (Fn [(java.lang.Map Any Any) -> true]
                             [(Not (java.lang.Map Any Any)) -> false]))
@@ -447,7 +446,7 @@
                 {:pre [(map? x)]}
                 x))
 
-            ((All [[a < (java.lang.Map java.lang.String Any)]] [a -> a]))
+            ((Fn (All [[a < (java.lang.Map java.lang.String Any)]] [a -> a])))
             (do (ann-class (java.lang.Map key val) [java.lang.Object])
               (ann map? (Fn [(java.lang.Map Any Any) -> true]
                             [(Not (java.lang.Map Any Any)) -> false]))
@@ -458,26 +457,37 @@
                  :post [(string-map? %)]}
                 x))
 
-            ((All [[a < java.lang.String]] [a -> a]))
+            ((Fn (All [[a < java.lang.String]] [a -> a])))
             (fn [^java.lang.String x]
               x)
 
-            ((All [[a < java.lang.Long]] [a -> a]))
-            (do (ann inc [java.lang.Long -> java.lang.Long])
-              (ann = [Any Any -> java.lang.Boolean])
+            ((Fn (All [[a < java.lang.Long]] [a -> a])))
+            (do (ann inc (Fn [java.lang.Long -> java.lang.Long]))
+              (ann = (Fn [Any Any -> java.lang.Boolean]))
               (fn [a]
                 (if (= 10 a)
                   a
                   (recur (inc a)))))
 
-            ([java.lang.Long -> Nothing])
-            (do (ann inc [java.lang.Long -> java.lang.Long])
-              (ann = [Any Any -> java.lang.Boolean])
+            ((Fn [java.lang.Long -> Nothing]))
+            (do (ann inc (Fn [java.lang.Long -> java.lang.Long]))
+              (ann = (Fn [Any Any -> java.lang.Boolean]))
               (fn [a]
                 (recur (inc a))))
+
+            ((Fn (All [[a < (java.lang.Map Any Any)]] [a -> a])
+                 [(Not (java.lang.Map Any Any)) -> "YOLO"]))
+            (do (ann-class (java.lang.Map key val) [java.lang.Object])
+              (ann map? (Fn [(java.lang.Map Any Any) -> true]
+                            [(Not (java.lang.Map Any Any)) -> false]))
+              (fn foo [x]
+                (if (map? x)
+                  x
+                  "YOLO")))
             )))
 
-  
+  (run '(do (ann identity (Fn (All [x] [x -> x])))
+          (identity "YOLO")))
 
   ;; MISSING: Recursive types
   ;; MISSING: Primitive types.
@@ -540,7 +550,6 @@
           ))
 
   ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
-  ;; TODO: Move polymorphism from functions to arities.
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
@@ -550,15 +559,6 @@
             (if (< cnt 10)
               (recur (inc cnt))
               :done))))
-
-  (run '(do (ann-class (java.lang.Map key val) [java.lang.Object])
-          (ann map? (Fn [(java.lang.Map Any Any) -> true]
-                        [(Not (java.lang.Map Any Any)) -> false]))
-          (fn foo [x]
-            (if (map? x)
-              x
-              "YOLO"))
-          ))
 
   
   ;; This is a valid way of implementing letfn using a macro...

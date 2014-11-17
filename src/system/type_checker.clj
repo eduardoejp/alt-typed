@@ -167,10 +167,20 @@
     (let [[[state arity :as world] & others] worlds
           [taken left] (reduce (fn [[taken left] [state* arity* :as world*]]
                                  (match [arity arity*]
+                                   [[::&type/all {} ?vars [::&type/arity ?args ?body]]
+                                    [::&type/all {} ?vars* [::&type/arity ?args* ?body*]]]
+                                   (if (and (= ?vars ?vars*)
+                                            (= ?args ?args*))
+                                     [(conj taken world*) left]
+                                     [taken (conj left world*)])
+
                                    [[::&type/arity ?args ?body] [::&type/arity ?args* ?body*]]
                                    (if (= ?args ?args*)
                                      [(conj taken world*) left]
-                                     [taken (conj left world*)])))
+                                     [taken (conj left world*)])
+
+                                   :else
+                                   [taken (conj left world*)]))
                                [[world] []]
                                others)]
       (fn [state]
@@ -308,24 +318,20 @@
     (exec [branches (&util/collect (exec [=test (check* ?test)]
                                      (&util/try-all [(&util/parallel [(exec [_ (&util/with-field :types
                                                                                  (&type/solve &type/+truthy+ =test))
-                                                                             =test* (match =test
-                                                                                      [::&type/hole _]
+                                                                             =test* (if (&type/type-var? =test)
                                                                                       (exec [[=top =bottom] (&util/with-field :types
                                                                                                               (&type/get-hole =test))]
                                                                                         (return =top))
-                                                                                      :else
                                                                                       (return =test))
                                                                              :when (and (not= =test* &type/+nothing+)
                                                                                         (not= =test* &type/+boolean+))]
                                                                         (check* ?then))
                                                                       (exec [_ (&util/with-field :types
                                                                                  (&type/solve &type/+falsey+ =test))
-                                                                             =test* (match =test
-                                                                                      [::&type/hole _]
+                                                                             =test* (if (&type/type-var? =test)
                                                                                       (exec [[=top =bottom] (&util/with-field :types
                                                                                                               (&type/get-hole =test))]
                                                                                         (return =top))
-                                                                                      :else
                                                                                       (return =test))
                                                                              :when (and (not= =test* &type/+nothing+)
                                                                                         (not= =test* &type/+boolean+))]
@@ -657,14 +663,11 @@
           (&type/fn-call =method =args)))
       (exec [=fn (check* ?fn)
              =args (map-m check* ?args)
-             =fn (match =fn
-                   [::&type/hole _]
+             =fn (if (&type/type-var? =fn)
                    (&util/with-field :types
                      (exec [=fn-type (&type/poly-fn (count =args))
                             _ (&type/solve =fn-type =fn)]
                        (return =fn-type)))
-                   
-                   :else
                    (return =fn))
              =return (&util/with-field :types
                        (&type/fn-call =fn =args))]

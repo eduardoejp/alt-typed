@@ -30,14 +30,6 @@
     [ctor []]
     [(first ctor) (vec (rest ctor))]))
 
-(defn ^:private parse-arity [parse-type-def type-def]
-  (match type-def
-    [& ?parts]
-    (let [[args [_ return]] (split-with (partial not= '->) ?parts)]
-      (exec [*args (map-m parse-type-def args)
-             *return (parse-type-def return)]
-        (&util/return [::&types/arity *args *return])))))
-
 (defn test-effects [*effs]
   (exec [_ (if (not (empty? *effs))
              (return nil)
@@ -166,11 +158,15 @@
       (return [::&types/record (into {} =kvs)]))
 
     [& ?arity]
-    (exec [=arity (parse-arity (partial parse-type-def local-syms) ?arity)]
-      (return [::&types/function (list =arity)]))
+    (match ?arity
+      [& ?parts]
+      (let [[args [_ return]] (split-with (partial not= '->) ?parts)]
+        (exec [*args (map-m (partial parse-type-def local-syms) args)
+               *return (parse-type-def local-syms return)]
+          (&util/return [::&types/arity *args *return]))))
     
     (['Fn & ?arities] :seq)
-    (exec [=arities (map-m (partial parse-arity (partial parse-type-def local-syms)) ?arities)]
+    (exec [=arities (map-m (partial parse-type-def local-syms) ?arities)]
       (return [::&types/function =arities]))
 
     (['All ?params ?def] :seq)
