@@ -259,13 +259,13 @@
                     :catch)
                   (finally :finally))))
 
-            ((Eff String {:io IO}))
-            (do (ann read-line (Fn [-> (Eff String {:io IO})]))
+            ((Eff java.lang.String {:io IO}))
+            (do (ann read-line (Fn [-> (Eff java.lang.String {:io IO})]))
               (read-line))
 
             ((Eff Nothing {:io IO, :try java.lang.Exception}))
             (do (ann ex (Fn [-> java.lang.Exception]))
-              (ann read-line (Fn [-> (Eff String {:io IO})]))
+              (ann read-line (Fn [-> (Eff java.lang.String {:io IO})]))
               (read-line)
               (throw (ex)))
 
@@ -324,16 +324,16 @@
             (do (ann-class (java.lang.Collection x) [java.lang.Object])
               (ann-class (java.lang.KV key val) [java.lang.Object])
               (ann-class (java.lang.Map key val) [(java.lang.Collection (java.lang.KV key val))])
-              (ann get-map [-> (java.lang.Map String Integer)])
+              (ann get-map [-> (java.lang.Map java.lang.String java.lang.Integer)])
               (ann coll->str (All [key val]
                                   [(java.lang.Collection (java.lang.KV key val)) -> java.lang.String]))
               (coll->str (get-map)))
 
-            ((java.lang.Collection (java.lang.KV String Integer)))
+            ((java.lang.Collection (java.lang.KV java.lang.String java.lang.Integer)))
             (do (ann-class (java.lang.Collection x) [java.lang.Object])
               (ann-class (java.lang.KV key val) [java.lang.Object])
               (ann-class (java.lang.Map key val) [(java.lang.Collection (java.lang.KV key val))])
-              (ann get-map [-> (java.lang.Map String Integer)])
+              (ann get-map [-> (java.lang.Map java.lang.String java.lang.Integer)])
               (ann ->coll (All [key val elem]
                                [(java.lang.Map key val) -> (java.lang.Collection (java.lang.KV key val))]))
               (->coll (get-map)))

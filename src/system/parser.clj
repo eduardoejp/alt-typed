@@ -54,6 +54,16 @@
              (return nil))]
     (return nil)))
 
+(defn ^:private parse-poly-args [parse-type-def local-syms args]
+  (map-m #(match %
+            (?open :guard symbol?)
+            (return ?open)
+            
+            [?bounded '< ?top]
+            (exec [=top (parse-type-def local-syms ?top)]
+              (return [?bounded '< =top])))
+         args))
+
 (defn parse-type-def [local-syms type-def]
   (match type-def
     nil
@@ -130,20 +140,16 @@
       (return [::&types/eff *data *effs]))
     
     (?name :guard symbol?)
-    (&util/try-all [;; (case (get local-syms ?name)
-                    ;;   :var
-                    ;;   (return ?name)
+    (case (get local-syms ?name)
+      :var
+      (return ?name)
 
-                    ;;   ;; :rec
-                    ;;   ;; (return [::&types/rec ?name])
+      ;; :rec
+      ;; (return [::&types/rec ?name])
 
-                    ;;   nil
-                    ;;   zero)
-                    (exec [state (&util/with-field :types
-                                   &util/get-state)]
-                      (&util/with-field :types
-                        (&types/resolve ?name)))
-                    (return ?name)])
+      nil
+      (&util/with-field :types
+        (&types/resolve ?name)))
     
     (['quote [& ?elems]] :seq)
     (exec [=elems (map-m (partial parse-type-def local-syms) ?elems)]
@@ -167,14 +173,7 @@
       (return [::&types/function =arities]))
 
     (['All ?params ?def] :seq)
-    (exec [*params (map-m #(match %
-                             (?open :guard symbol?)
-                             (return ?open)
-                             
-                             [?bounded '< ?top]
-                             (exec [=top (parse-type-def local-syms ?top)]
-                               (return [?bounded '< =top])))
-                          ?params)
+    (exec [*params (parse-poly-args parse-type-def local-syms ?params)
            *def (parse-type-def (into local-syms (for [p ?params]
                                                    (match p
                                                      (?open :guard symbol?)
@@ -406,8 +405,15 @@
       (?parents :guard (every-pred vector? (partial every? type-ctor?)))
       & ?fields+methods] :seq)
     (exec [:let [[_ params :as *type-ctor] (parse-type-ctor ?class)]
-           *parents (map-m (partial parse-type-def (into {} (for [p params] [p :var]))) ?parents)]
-      (return [::ann-class *type-ctor (vec *parents) ?fields+methods]))
+           *params (parse-poly-args parse-type-def {} params)
+           :let [*locals (into {} (for [p params]
+                                    (match p
+                                      (?open :guard symbol?)
+                                      [?open :var]
+                                      [?bounded '< ?top]
+                                      [?bounded :var])))]
+           *parents (map-m (partial parse-type-def *locals) ?parents)]
+      (return [::ann-class (conj *type-ctor *params) (vec *parents) ?fields+methods]))
 
     (['defalias (?ctor :guard type-ctor?) ?type-def] :seq)
     (let [[name args] (if (symbol? ?ctor)

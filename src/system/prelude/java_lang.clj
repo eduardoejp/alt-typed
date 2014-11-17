@@ -20,6 +20,7 @@
                                        (ann-class java.lang.Short [java.lang.Number])
                                        (ann-class java.lang.Integer [java.lang.Number])
                                        (ann-class java.lang.Double [java.lang.Number])
+                                       (ann-class clojure.lang.IPersistentMap [java.lang.Object])
                                        (ann-class java.lang.Long [java.lang.Number]
                                                   :ctor [java.lang.String -> java.lang.Long]
                                                   :static-methods {decode [java.lang.String -> java.lang.Long]}

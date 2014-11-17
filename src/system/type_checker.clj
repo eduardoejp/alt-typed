@@ -692,18 +692,16 @@
     [::&parser/ann-class ?class ?parents ?fields+methods]
     (exec [=class (&util/with-field :types
                     (&type/define-class ?class ?parents))
-           all-categories+members (map-m
-                                   (fn [[category members]]
-                                     (if (= :ctor category)
-                                       (exec [=ctor (&parser/parse-type-def {} members)]
-                                         (return [:ctor =ctor]))
-                                       (exec [all-members+types (map-m
-                                                                 (fn [[name type]]
-                                                                   (exec [=type (&parser/parse-type-def {} type)]
-                                                                     (return [name =type])))
-                                                                 members)]
-                                         (return [category (into {} all-members+types)]))))
-                                   (apply hash-map ?fields+methods))
+           all-categories+members (map-m (fn [[category members]]
+                                           (if (= :ctor category)
+                                             (exec [=ctor (&parser/parse-type-def {} members)]
+                                               (return [:ctor =ctor]))
+                                             (exec [all-members+types (map-m (fn [[name type]]
+                                                                               (exec [=type (&parser/parse-type-def {} type)]
+                                                                                 (return [name =type])))
+                                                                             members)]
+                                               (return [category (into {} all-members+types)]))))
+                                         (apply hash-map ?fields+methods))
            _ (&util/with-field :types
                (&type/define-class-members (nth ?class 0) (into {} all-categories+members)))]
       (return [::&type/nil]))

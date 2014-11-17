@@ -103,12 +103,12 @@
 (defn ^:private qualify-class [class]
   (symbol "java::class" (name class)))
 
-(defn define-class [[class params] parents]
+(defn define-class [[class params full-params] parents]
   (&util/try-all [(exec [_ (resolve class)]
                     zero)
                   (exec [:let [=instance (if (empty? params)
                                            [::object class []]
-                                           [::all {} params [::object class params]])]
+                                           [::all {} full-params [::object class params]])]
                          _ (define-type class =instance)]
                     (fn [^Types state]
                       (let [class-name (qualify-class class)]
@@ -120,7 +120,7 @@
                                        (assoc :class-hierarchy hierarchy*)
                                        (assoc-in [:class-categories class] :class)
                                        (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
-                                                                                [p-class [::all {} params [::object p-class p-params]]])
+                                                                                [p-class [::all {} full-params [::object p-class p-params]]])
                                                                               parents))))
                                    nil]))
                           '()))
