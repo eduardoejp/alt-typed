@@ -161,43 +161,6 @@
     :else
     (return type)))
 
-(defn ^:private ground-type [type]
-  (match type
-    [::&type/hole _]
-    (exec [[=top =bottom] (&util/with-field :types
-                            (&type/get-hole type))
-           ;; :let [_ (prn 'Grounding type =top =bottom)]
-           ]
-      (if (and (= [::&type/any] =top)
-               (not= [::&type/nothing] =bottom))
-        (ground-type =bottom)
-        (ground-type =top)))
-    
-    [::&type/object ?class ?params]
-    (exec [=params (map-m ground-type ?params)]
-      (return [::&type/object ?class =params]))
-
-    [::&type/union ?types]
-    (exec [=types (map-m ground-type ?types)]
-      (&util/with-field :types
-        (reduce-m &type/$or [::&type/nothing] =types)))
-
-    [::&type/complement ?type]
-    (exec [=type (ground-type ?type)]
-      (return [::&type/complement =type]))
-
-    [::&type/function ?arities]
-    (exec [=arities (map-m ground-type ?arities)]
-      (return [::&type/function =arities]))
-
-    [::&type/arity ?args ?body]
-    (exec [=args (map-m ground-type ?args)
-           =body (ground-type ?body)]
-      (return [::&type/arity =args =body]))
-    
-    :else
-    (return type)))
-
 (defn ^:private fresh-poly-fn [num-args]
   (exec [=args (map-m (fn [_] &type/fresh-hole) (repeat num-args nil))
          =return &type/fresh-hole]
@@ -770,7 +733,7 @@
 ;; Functions
 (defn check [form]
   #(let [results ((exec [type (check* form)]
-                    (ground-type type)) %)]
+                    (prettify-type nil type)) %)]
      (if (empty? results)
        '()
        (do ;; (prn '(count results) (count results) (mapv second results))
