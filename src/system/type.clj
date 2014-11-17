@@ -667,8 +667,11 @@
     (exec [=fn (upcast ::$fn =fn)]
       (match =fn
         [::function ?arities]
-        (exec [=arity (return-all ?arities)]
-          (check-arity =arity =args))))))
+        (fn [state]
+          (clojure.core/apply concat (pmap #((check-arity % =args) state) ?arities)))
+        ;; (exec [=arity (return-all ?arities)]
+        ;;   (check-arity =arity =args))
+        ))))
 
 (defn holes [type]
   (match type
