@@ -22,6 +22,12 @@
 
 ;; [Interface]
 ;; Constants
+(def +any+ [::any])
+(def +nothing+ [::nothing])
+(def +nil+ [::nil])
+(def +boolean+ [::object 'java.lang.Boolean []])
+(def +macro+ [::macro])
+
 (def +falsey+ [::union (list [::nil] [::literal 'java.lang.Boolean false])])
 (def +truthy+ [::complement +falsey+])
 (def +ambiguous+ [::any])
@@ -87,6 +93,11 @@
           :else
           (list [state hole]))
         '()))))
+
+(defn poly-fn [num-args]
+  (exec [=args (map-m (constantly fresh-hole) (repeat num-args nil))
+         =return fresh-hole]
+    (return [::function (list [::arity (vec =args) =return])])))
 
 ;; Monads / DB
 (defn define-type [type-name type-def]
@@ -422,10 +433,10 @@
     [::all ?env ?params ?type-def]
     (do ;; (prn `(~'= ~(count ?params) ~(count params))
         ;;      (into ?env (map vector (prepare-params ?params) params)))
-      (if (= (count ?params) (count params))
-        (realize (into ?env (map vector (prepare-params ?params) params))
-                 ?type-def)
-        zero))
+        (if (= (count ?params) (count params))
+          (realize (into ?env (map vector (prepare-params ?params) params))
+                   ?type-def)
+          zero))
     
     :else
     zero))
@@ -594,6 +605,14 @@
                       (return [::nothing]))])
     ))
 
+(defn $not [type]
+  (return (match type
+            [::complement ?inner]
+            ?inner
+
+            :else
+            [::complement type])))
+
 (defn sequential [t1 t2]
   (match [t1 t2]
     [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
@@ -632,3 +651,100 @@
     [_ _]
     ($or t1 t2)
     ))
+
+(letfn [(check-arity [=arity =args]
+          (match =arity
+            [::arity ?args ?return]
+            (exec [_ (map-m (fn [[arg input]]
+                              (solve arg input))
+                            (map vector ?args =args))]
+              (return ?return))))]
+  (defn fn-call [=fn =args]
+    ;; (prn 'fn-call =fn =args)
+    (exec [=fn (exec [=fn (instantiate =fn)]
+                 (if (type-fn? =fn)
+                   (fn-call =fn =args)
+                   (upcast ::$fn =fn)))]
+      (match =fn
+        [::function ?arities]
+        (exec [=arity (return-all (for [[_ args _ :as arity] ?arities
+                                        :when (= (count args) (count =args))]
+                                    arity))]
+          (check-arity =arity =args))))))
+
+(defn holes [type]
+  (match type
+    [::hole _]
+    (exec [=hole (normalize-hole type)
+           [=top =bottom] (get-hole =hole)
+           at-top (holes =top)
+           at-bottom (holes =bottom)
+           :let [total-count (merge-with + {=hole 1} at-top at-bottom)]]
+      (return total-count))
+    
+    ;; [::var _]
+    ;; (return (list type))
+
+    [::object _ ?params]
+    (exec [all-holes (map-m holes ?params)]
+      (return (clojure.core/apply merge-with + all-holes)))
+
+    [::union ?types]
+    (exec [all-holes (map-m holes ?types)]
+      (return (clojure.core/apply merge-with + all-holes)))
+
+    [::complement ?type]
+    (holes ?type)
+
+    [::function ?arities]
+    (exec [all-holes (map-m holes ?arities)]
+      (return (clojure.core/apply merge-with + all-holes)))
+
+    [::arity ?args ?return]
+    (exec [all-holes (map-m holes ?args)
+           return-holes (holes ?return)]
+      (return (clojure.core/apply merge-with + return-holes all-holes)))
+    
+    :else
+    (return {})))
+
+(defn $tuple [elems]
+  (return [::tuple (vec elems)]))
+
+(defn $record [kvs]
+  (return [::record kvs]))
+
+(defn $literal [value]
+  (return (cond (instance? java.lang.Boolean value)
+                [::literal 'java.lang.Boolean value]
+                
+                (instance? clojure.lang.BigInt value)
+                [::literal 'clojure.lang.BigInt value]
+                
+                (instance? java.math.BigDecimal value)
+                [::literal 'java.math.BigDecimal value]
+                
+                (integer? value)
+                [::literal 'java.lang.Long value]
+                
+                (float? value)
+                [::literal 'java.lang.Double value]
+                
+                (ratio? value)
+                [::literal 'clojure.lang.Ratio value]
+
+                (instance? java.lang.Character value)
+                [::literal 'java.lang.Character value]
+                
+                (string? value)
+                [::literal 'java.lang.String value]
+                
+                (instance? java.util.regex.Pattern value)
+                [::literal 'java.util.regex.Pattern value]
+                
+                (keyword? value)
+                [::literal 'clojure.lang.Keyword value]
+
+                (symbol? value)
+                [::literal 'clojure.lang.Symbol value]
+                )))

@@ -251,6 +251,7 @@
             ((Eff (Or :catch :else) {:try java.lang.Exception}))
             (do (ann test (Or true false))
               (ann ex (Fn [-> java.lang.Exception]))
+              (ann-class java.lang.YoloException [java.lang.Exception])
               (let [test* test]
                 (try (if test*
                        (throw (ex))
@@ -475,6 +476,8 @@
               (fn [a]
                 (recur (inc a))))
             )))
+
+  
 
   ;; MISSING: Recursive types
   ;; MISSING: Primitive types.

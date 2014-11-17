@@ -23,10 +23,10 @@
            ;; :let [_ (prn 'clean-env type =top =bottom)]
            ]
       (if (contains? to-clean type)
-        (return (cond (= [::&type/nothing] =bottom)
+        (return (cond (= &type/+nothing+ =bottom)
                       =top
                       
-                      (= [::&type/any] =top)
+                      (= &type/+any+ =top)
                       =bottom
 
                       :else
@@ -42,7 +42,7 @@
     [::&type/union ?types]
     (exec [=types (map-m (partial clean-env to-clean) ?types)]
       (&util/with-field :types
-        (reduce-m &type/$or [::&type/nothing] =types)))
+        (reduce-m &type/$or &type/+nothing+ =types)))
 
     [::&type/complement ?type]
     (exec [=type (clean-env to-clean ?type)]
@@ -70,44 +70,6 @@
              &env/exit)]
     (return =type)))
 
-(defn ^:private extract-holes [type]
-  (match type
-    [::&type/hole _]
-    (exec [=hole (&util/with-field :types
-                   (&type/normalize-hole type))
-           [=top =bottom] (&util/with-field :types
-                            (&type/get-hole =hole))
-           at-top (extract-holes =top)
-           at-bottom (extract-holes =bottom)
-           :let [total-count (merge-with + {=hole 1} at-top at-bottom)]]
-      (return total-count))
-    
-    ;; [::&type/var _]
-    ;; (return (list type))
-
-    [::&type/object _ ?params]
-    (exec [all-holes (map-m extract-holes ?params)]
-      (return (apply merge-with + all-holes)))
-
-    [::&type/union ?types]
-    (exec [all-holes (map-m extract-holes ?types)]
-      (return (apply merge-with + all-holes)))
-
-    [::&type/complement ?type]
-    (extract-holes ?type)
-
-    [::&type/function ?arities]
-    (exec [all-holes (map-m extract-holes ?arities)]
-      (return (apply merge-with + all-holes)))
-
-    [::&type/arity ?args ?return]
-    (exec [all-holes (map-m extract-holes ?args)
-           return-holes (extract-holes ?return)]
-      (return (apply merge-with + return-holes all-holes)))
-    
-    :else
-    (return {})))
-
 (defn ^:private prettify-type [mappings type]
   (match type
     [::&type/hole _]
@@ -130,8 +92,8 @@
                                   (&type/get-hole =type))
                  ;; :let [_ (prn 'Prettifying =type =top =bottom)]
                  ]
-            (if (and (= [::&type/any] =top)
-                     (not= [::&type/nothing] =bottom))
+            (if (and (= &type/+any+ =top)
+                     (not= &type/+nothing+ =bottom))
               (prettify-type mappings =bottom)
               (prettify-type mappings =top)))
           )))
@@ -143,7 +105,7 @@
     [::&type/union ?types]
     (exec [=types (map-m (partial prettify-type mappings) ?types)]
       (&util/with-field :types
-        (reduce-m &type/$or [::&type/nothing] =types)))
+        (reduce-m &type/$or &type/+nothing+ =types)))
 
     [::&type/complement ?type]
     (exec [=type (prettify-type mappings ?type)]
@@ -161,11 +123,6 @@
     :else
     (return type)))
 
-(defn ^:private fresh-poly-fn [num-args]
-  (exec [=args (map-m (fn [_] &type/fresh-hole) (repeat num-args nil))
-         =return &type/fresh-hole]
-    (return [::&type/function (list [::&type/arity (vec =args) =return])])))
-
 (let [+var-names+ (for [idx (iterate inc 1)
                         alphabet "abcdefghijklmnopqrstuvwxyz"]
                     (if (= 1 idx)
@@ -175,9 +132,11 @@
     ;; (prn 'generalize-arity arity)
     (match arity
       [::&type/arity ?args ?body]
-      (exec [body-vars (extract-holes ?body)
+      (exec [body-vars (&util/with-field :types
+                         (&type/holes ?body))
              ;; :let [_ (prn 'body-vars body-vars)]
-             args-vars (exec [all-holes (map-m extract-holes ?args)]
+             args-vars (exec [all-holes (&util/with-field :types
+                                          (map-m &type/holes ?args))]
                          (return (apply merge-with + all-holes)))
              ;; :let [_ (prn 'args-vars args-vars)]
              :let [poly-vars (merge-with + args-vars body-vars)
@@ -218,34 +177,11 @@
         (let [batch (if (= 1 (count taken))
                       (list [state (-> taken first (nth 1))])
                       (list [state (let [[[_ returns]] ((&util/with-field :types
-                                                          (reduce-m &type/parallel [::&type/nothing] (mapv #(-> % (nth 1) (nth 2)) taken))) state)]
+                                                          (reduce-m &type/parallel &type/+nothing+ (mapv #(-> % (nth 1) (nth 2)) taken))) state)]
                                      (-> taken first (nth 1) (assoc-in [2] returns)))])
                       )]
           (concat batch ((merge-arities left) state))))
       )))
-
-(defn ^:private check-arity [=arity =args]
-  (match =arity
-    [::&type/arity ?args ?return]
-    (exec [_ (map-m (fn [[arg input]]
-                      (&util/with-field :types
-                        (&type/solve arg input)))
-                    (map vector ?args =args))]
-      (return ?return))))
-
-(defn ^:private fn-call [=fn =args]
-  ;; (prn 'fn-call =fn =args)
-  (exec [=fn (&util/with-field :types
-               (exec [=fn (&type/instantiate =fn)]
-                 (if (&type/type-fn? =fn)
-                   (fn-call =fn =args)
-                   (&type/upcast ::&type/$fn =fn))))]
-    (match =fn
-      [::&type/function ?arities]
-      (exec [=arity (return-all (for [[_ args _ :as arity] ?arities
-                                      :when (= (count args) (count =args))]
-                                  arity))]
-        (check-arity =arity =args)))))
 
 (defrecord ClassTypeCtor [class args])
 
@@ -253,79 +189,78 @@
   (symbol (name prefix) (name body)))
 
 (defn ^:private ann-class [class parents]
-  (exec [:let [class+ [::&type/class class]]
-         ns (&util/with-field :env
+  (exec [ns (&util/with-field :env
               &env/current-ns)
          _ (&util/with-field :types
              (&type/define-class (qualify ns (:class class)) (map :class parents)))]
-    (return [::&type/nil])))
+    (return &type/+nil+)))
 
 (defn check* [form]
   (match form
     [::&parser/#nil]
-    (return [::&type/nil])
+    (return &type/+nil+)
     
     [::&parser/#boolean ?value]
-    (return [::&type/literal 'java.lang.Boolean ?value])
-
+    (&type/$literal ?value)
+    
     [::&parser/#integer ?value]
-    (return [::&type/literal 'java.lang.Long ?value])
+    (&type/$literal ?value)
 
     [::&parser/#real ?value]
-    (return [::&type/literal 'java.lang.Double ?value])
+    (&type/$literal ?value)
 
     [::&parser/#big-int ?value]
-    (return [::&type/literal 'clojure.lang.BigInt ?value])
+    (&type/$literal ?value)
 
     [::&parser/#big-decimal ?value]
-    (return [::&type/literal 'java.math.BigDecimal ?value])
+    (&type/$literal ?value)
 
     [::&parser/#ratio ?value]
-    (return [::&type/literal 'clojure.lang.Ratio ?value])
+    (&type/$literal ?value)
 
     [::&parser/#character ?value]
-    (return [::&type/literal 'java.lang.Character ?value])
+    (&type/$literal ?value)
 
     [::&parser/#string ?value]
-    (return [::&type/literal 'java.lang.String ?value])
+    (&type/$literal ?value)
 
     [::&parser/#regex ?value]
-    (return [::&type/literal 'java.util.regex.Pattern ?value])
+    (&type/$literal ?value)
 
     [::&parser/#keyword ?value]
-    (return [::&type/literal 'clojure.lang.Keyword ?value])
+    (&type/$literal ?value)
 
     [::&parser/#symbol ?value]
-    (return [::&type/literal 'clojure.lang.Symbol ?value])
+    (&type/$literal ?value)
 
     [::&parser/#list ?value]
     (exec [=elems (map-m check* ?value)
            =elems (&util/with-field :types
-                    (reduce-m &type/$or [::&type/nothing] =elems))]
-      (return [::&type/object 'clojure.lang.PersistentList [=elems]]))
-    
-    [::&parser/#vector ?value]
-    (if (empty? ?value)
-      (return [::&type/tuple []])
-      (exec [=elems (map-m check* ?value)]
-        (return [::&type/tuple (vec =elems)])))
-
-    [::&parser/#map ?value]
-    (if (empty? ?value)
-      (return [::&type/record {}])
-      (exec [=elems (map-m (fn [[?k ?v]]
-                             (exec [=k (check* ?k)
-                                    =v (check* ?v)]
-                               (return [=k =v])))
-                           (seq ?value))]
-        (return [::&type/record (into {} =elems)])))
+                    (reduce-m &type/$or &type/+nothing+ =elems))]
+      (&util/with-field :types
+        (&type/instantiate* 'clojure.lang.PersistentList [=elems])))
 
     [::&parser/#set ?value]
     (exec [=elems (map-m check* ?value)
            =elems (&util/with-field :types
-                    (reduce-m &type/$or [::&type/nothing] =elems))]
-      (return [::&type/object 'clojure.lang.IPersistentSet [=elems]]))
+                    (reduce-m &type/$or &type/+nothing+ =elems))]
+      (&util/with-field :types
+        (&type/instantiate* 'clojure.lang.IPersistentSet [=elems])))
     
+    [::&parser/#vector ?value]
+    (exec [=elems (map-m check* ?value)]
+      (&util/with-field :types
+        (&type/$tuple =elems)))
+
+    [::&parser/#map ?value]
+    (exec [=elems (map-m (fn [[?k ?v]]
+                           (exec [=k (check* ?k)
+                                  =v (check* ?v)]
+                             (return [=k =v])))
+                         (seq ?value))]
+      (&util/with-field :types
+        (&type/$record (into {} =elems))))
+
     [::&parser/symbol ?symbol]
     (if-let [ns (namespace ?symbol)]
       (exec [[class =field] (&util/with-field :types
@@ -334,7 +269,7 @@
         (return =field))
       (&util/try-all [(exec [=symbol (&util/with-field :env
                                        (&env/resolve ?symbol))
-                             :when (not= [::&type/macro] =symbol)]
+                             :when (not= &type/+macro+ =symbol)]
                         (return =symbol))
                       (exec [? (&util/with-field :types
                                  (&type/class-defined? ?symbol))
@@ -350,7 +285,7 @@
                              (check* ?form)))
                          ?forms)]
       (&util/with-field :types
-        (reduce-m &type/sequential [::&type/nil] =forms)))
+        (reduce-m &type/sequential &type/+nil+ =forms)))
 
     [::&parser/let ([[?label ?value] & ?bindings] :seq) ?body]
     (exec [=value (check* ?value)
@@ -360,7 +295,7 @@
            ;; :let [_ (prn ::&parser/let '[?label =value] [?label =value])]
            =binding (&util/with-field :types
                       (exec [=hole (&type/fresh-var ?label)
-                             _ (&type/narrow-hole =hole =value [::&type/nothing])]
+                             _ (&type/narrow-hole =hole =value &type/+nothing+)]
                         (return =hole)))
            ;; :let [_ (prn ::&parser/let '=binding =binding)]
            ]
@@ -380,8 +315,8 @@
                                                                                         (return =top))
                                                                                       :else
                                                                                       (return =test))
-                                                                             :when (and (not= =test* [::&type/nothing])
-                                                                                        (not= =test* [::&type/object 'java.lang.Boolean []]))]
+                                                                             :when (and (not= =test* &type/+nothing+)
+                                                                                        (not= =test* &type/+boolean+))]
                                                                         (check* ?then))
                                                                       (exec [_ (&util/with-field :types
                                                                                  (&type/solve &type/+falsey+ =test))
@@ -392,8 +327,8 @@
                                                                                         (return =top))
                                                                                       :else
                                                                                       (return =test))
-                                                                             :when (and (not= =test* [::&type/nothing])
-                                                                                        (not= =test* [::&type/object 'java.lang.Boolean []]))]
+                                                                             :when (and (not= =test* &type/+nothing+)
+                                                                                        (not= =test* &type/+boolean+))]
                                                                         (check* ?else))])
                                                      (exec [_ (&util/with-field :types
                                                                 (&type/solve &type/+ambiguous+ =test))
@@ -412,7 +347,7 @@
                          (exec [=test (if (seq? ?test)
                                         (exec [?parts (map-m check* ?test)]
                                           (&util/with-field :types
-                                            (reduce-m &type/$or [::&type/nothing] ?parts)))
+                                            (reduce-m &type/$or &type/+nothing+ ?parts)))
                                         (check* ?test))]
                            (return [=test ?form])))
                        ?clauses)
@@ -437,7 +372,7 @@
                                    ;; :let [_ (prn ::&parser/loop [label =value] [=top =bottom])]
                                    =hole (&util/with-field :types
                                            (exec [=hole &type/fresh-hole
-                                                  _ (&type/narrow-hole =hole [::&type/any] =top)
+                                                  _ (&type/narrow-hole =hole &type/+any+ =top)
                                                   ;; [=top* =bottom*] (&type/get-hole =hole)
                                                   ;; :let [_ (prn ::&parser/loop =hole [=top* =bottom*])]
                                                   ]
@@ -458,26 +393,25 @@
            _ (&util/with-field :types
                (map-m (fn [[=e =a]] (&type/solve =a =e))
                       (map vector =recur =args)))]
-      (return [::&type/nothing]))
+      (return &type/+nothing+))
 
     [::&parser/assert ?test ?message]
     (exec [=message (check* ?message)
            _ (&util/with-field :types
-               (&type/solve [::&type/any] =message))
+               (&type/solve &type/+any+ =message))
            =test (check* ?test)
            _ (&util/try-all [(&util/with-field :types
                                (&type/solve &type/+truthy+ =test))
                              (&util/with-field :types
-                               (exec [=boolean (&type/instantiate* 'java.lang.Boolean [])]
-                                 (if (= =boolean =test)
-                                   (return true)
-                                   zero)))])]
-      (return [::&type/nil]))
+                               (if (= &type/+boolean+ =test)
+                                 (return true)
+                                 zero))])]
+      (return &type/+nil+))
     
     [::&parser/def ?var ?value]
     (exec [=value (if ?value
                     (check* ?value)
-                    (return [::&type/nothing]))
+                    (return &type/+nothing+))
            _ (&util/with-field :types
                (if-let [tag (-> ?var meta :tag)]
                  (exec [=tag (&type/instantiate* tag)
@@ -498,9 +432,9 @@
     [::&parser/throw ?ex]
     (exec [=ex (check* ?ex)
            _ (&util/with-field :types
-               (exec [=exception (&type/instantiate* 'java.lang.Exception [])]
+               (exec [=exception (&type/instantiate* 'java.lang.Throwable)]
                  (&type/solve =exception =ex)))]
-      (return [::&type/eff [::&type/nothing] {:try =ex}]))
+      (return [::&type/eff &type/+nothing+ {:try =ex}]))
     
     [::&parser/try ?body ?catches ?finally]
     (exec [=body (check* ?body)
@@ -528,14 +462,16 @@
            =catches (map-m check* ?catches)
            =finally (check* ?finally)
            =all-returning (&util/with-field :types
-                            (reduce-m &type/parallel [::&type/nothing] (cons =clean-body =catches)))]
+                            (reduce-m &type/parallel &type/+nothing+ (cons =clean-body =catches)))]
       (&util/with-field :types
         (&type/sequential =finally =all-returning)))
 
     [::&parser/catch ?class ?label ?body]
-    (with-env {?label [::&type/object ?class []]}
-      (check* ?body))
-
+    (exec [=ex (&util/with-field :types
+                 (&type/instantiate* ?class))]
+      (with-env {?label =ex}
+        (check* ?body)))
+    
     [::&parser/defmulti ?name ?dispatch-fn]
     (exec [=dispatch-fn (check* ?dispatch-fn)
            ;; :let [_ (prn "#1")]
@@ -559,7 +495,8 @@
                ;; :let [_ (prn "#2")]
                =dispatch-val (check* ?dispatch-val)
                ;; :let [_ (prn "#3")]
-               =return (fn-call ?dispatch-fn =args)
+               =return (&util/with-field :types
+                         (&type/fn-call ?dispatch-fn =args))
                ;; :let [_ (prn "#4")]
                _ (&util/with-field :types
                    (&type/solve =return =dispatch-val))
@@ -586,14 +523,16 @@
     [::&parser/monitor-enter ?object]
     (exec [=object (check* ?object)
            _ (&util/with-field :types
-               (&type/solve [::&type/complement [::&type/nil]] =object))]
-      (return [::&type/nil]))
+               (exec [=limit (&type/$not &type/+nil+)]
+                 (&type/solve =limit =object)))]
+      (return &type/+nil+))
 
     [::&parser/monitor-exit ?object]
     (exec [=object (check* ?object)
            _ (&util/with-field :types
-               (&type/solve [::&type/complement [::&type/nil]] =object))]
-      (return [::&type/nil]))
+               (exec [=limit (&type/$not &type/+nil+)]
+                 (&type/solve =limit =object)))]
+      (return &type/+nil+))
 
     [::&parser/binding ?bindings ?body]
     (exec [_ (map-m
@@ -649,7 +588,7 @@
     [::&parser/ann ?var ?type]
     (exec [_ (&util/with-field :env
                (&env/intern ?var ?type))]
-      (return [::&type/nil]))
+      (return &type/+nil+))
 
     [::&parser/ann-class ?class ?parents ?fields+methods]
     (exec [=class (&util/with-field :types
@@ -666,18 +605,19 @@
                                          (apply hash-map ?fields+methods))
            _ (&util/with-field :types
                (&type/define-class-members (nth ?class 0) (into {} all-categories+members)))]
-      (return [::&type/nil]))
+      (return &type/+nil+))
     
     [::&parser/defalias ?name ?type-def]
     (exec [_ (&util/with-field :types
                (&type/define-type ?name ?type-def))]
-      (return [::&type/nil]))
+      (return &type/+nil+))
 
     [::&parser/field-access ?field ?obj]
     (exec [=obj (check* ?obj)
            [class =field] (&util/with-field :types
                             (&type/member-candidates [?field :fields]))]
-      (fn-call =field (list =obj)))
+      (&util/with-field :types
+        (&type/fn-call =field (list =obj))))
     
     [::&parser/method-call ?method ?obj ?args]
     (exec [=obj (check* ?obj)
@@ -687,14 +627,17 @@
            _ (&util/with-field :types
                (exec [=object (&type/instantiate* class [])]
                  (&type/solve =object =obj)))
-           =method (fn-call =method (list =obj))]
-      (fn-call =method =args))
+           =method (&util/with-field :types
+                     (&type/fn-call =method (list =obj)))]
+      (&util/with-field :types
+        (&type/fn-call =method =args)))
 
     [::&parser/new ?class ?args]
     (exec [=args (map-m check* ?args)
            [_ =ctor] (&util/with-field :types
                        (&type/member-candidates [?class :ctor]))]
-      (fn-call =ctor =args))
+      (&util/with-field :types
+        (&type/fn-call =ctor =args)))
 
     [::&parser/fn-call ?fn ?args]
     (if-let [[?class ?method] (match ?fn
@@ -710,19 +653,21 @@
              =method (if (= class ?class)
                        (return =method)
                        zero)]
-        (fn-call =method =args))
+        (&util/with-field :types
+          (&type/fn-call =method =args)))
       (exec [=fn (check* ?fn)
              =args (map-m check* ?args)
              =fn (match =fn
                    [::&type/hole _]
                    (&util/with-field :types
-                     (exec [=fn-type (fresh-poly-fn (count =args))
+                     (exec [=fn-type (&type/poly-fn (count =args))
                             _ (&type/solve =fn-type =fn)]
                        (return =fn-type)))
                    
                    :else
                    (return =fn))
-             =return (fn-call =fn =args)]
+             =return (&util/with-field :types
+                       (&type/fn-call =fn =args))]
         (return =return)))
     ))
 
@@ -737,7 +682,7 @@
      (if (empty? results)
        '()
        (do ;; (prn '(count results) (count results) (mapv second results))
-         ((&util/with-field :types
-            (reduce-m &type/parallel [::&type/nothing] (mapv second results)))
-          %)))
+           ((&util/with-field :types
+              (reduce-m &type/parallel &type/+nothing+ (mapv second results)))
+            %)))
      ))

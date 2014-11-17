@@ -27,6 +27,9 @@
                                                   :static-fields {MAX_VALUE java.lang.Long}
                                                   :methods {doubleValue [-> java.lang.Double]}
                                                   :fields {value java.lang.Long})
-                                       (ann-class java.lang.Exception [java.lang.Object])
-                                       (ann-class (clojure.lang.Var x) [java.lang.Object])))]
+                                       (ann-class java.lang.Throwable [java.lang.Object])
+                                       (ann-class java.lang.Exception [java.lang.Throwable])
+                                       (ann-class (clojure.lang.Var x) [java.lang.Object])
+                                       (ann-class (clojure.lang.PersistentList elems) [java.lang.Object])
+                                       (ann-class (clojure.lang.IPersistentSet elems) [java.lang.Object])))]
     (&type-checker/check* parsed-code)))

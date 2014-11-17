@@ -14,6 +14,7 @@
            integer?
            float?
            ratio?
+           (partial instance? java.lang.Character)
            string?
            (partial instance? java.util.regex.Pattern)
            keyword?
