@@ -35,7 +35,7 @@
       (list [(update-in state [:heap]
                         #(-> %
                              (update-in [:counter] inc)
-                             (assoc-in [:mappings id] [::interval [::any] [::nothing]])))
+                             (assoc-in [:mappings id] [[::any] [::nothing]])))
              [::hole id]]))))
 
 (defn get-hole [hole]
@@ -48,23 +48,23 @@
         (if (contains? mappings ?id)
           (let [=type (get mappings ?id)]
             (match =type
-              [::interval ?top ?bottom]
-              (list [state [?top ?bottom]])
-              
               [::hole _]
-              ((get-hole =type) state)))
+              ((get-hole =type) state)
+
+              [?top ?bottom]
+              (list [state [?top ?bottom]])))
           '())))))
 
 (defn narrow-hole [hole top bottom]
   (match hole
     [::hole ?id]
     (fn [state]
-      (list [(assoc-in state [:heap :mappings ?id] [::interval top bottom]) nil]))
+      (list [(assoc-in state [:heap :mappings ?id] [top bottom]) nil]))
     ;; (exec [[?top ?bottom] (get-hole hole)
     ;;        _ (solve ?top top)
     ;;        _ (solve bottom ?bottom)]
     ;;   (fn [state]
-    ;;     (list [(assoc-in state [:heap :mappings ?id] [::interval top bottom]) nil])))
+    ;;     (list [(assoc-in state [:heap :mappings ?id] [top bottom]) nil])))
     ))
 
 (defn redirect-hole [from to]
@@ -454,21 +454,13 @@
     :else
     (return type)))
 
-(defn type-fn? [type]
-  (match type
-    [::all _ _ _]
-    true
-    
-    :else
-    false))
-
-(defn multi-fn? [type]
-  (match type
-    [::multi-fn _ _]
-    true
-    
-    :else
-    false))
+(do-template [<name> <type>]
+  (defn <name> [type]
+    (match type
+      <type> true
+      :else  false))
+  type-fn?  [::all _ _ _]
+  multi-fn? [::multi-fn _ _])
 
 (defn instantiate*
   ([name]
