@@ -8,7 +8,7 @@
                                             zero return return-all]])))
 
 (declare $or $and apply
-         solve)
+         solve realize)
 
 ;; [Data]
 (defrecord TypeHeap [counter mappings])
@@ -107,6 +107,7 @@
 
 (defn resolve [type-name]
   (fn [^Types state]
+    ;; (prn 'resolve type-name (-> state .-db (get type-name)) (-> state .-db))
     (when-let [type (-> state .-db (get type-name))]
       (list [state type]))))
 
@@ -259,7 +260,7 @@
     ))
 
 (defn solve [expected actual]
-  ;; (prn 'solve expected actual)
+  (prn 'solve expected actual)
   (match [expected actual]
     [[::hole ?e-id] [::hole ?a-id]]
     (if (= ?e-id ?a-id)
@@ -301,6 +302,12 @@
            _ (narrow-hole expected =top =new-bottom)]
       (return true))
 
+    [[::alias ?name ?type] _]
+    (solve ?type actual)
+
+    [_ [::alias ?name ?type]]
+    (solve expected ?type)
+    
     [[::any] _]
     (return true)
 
@@ -358,6 +365,36 @@
         (return true))
       zero)
 
+    [[::rec ?name ?type] _]
+    (exec [=type (realize {} expected)
+           :let [_ (prn '=type =type)]]
+      (solve =type actual))
+
+    [_ [::rec ?name ?type]]
+    (exec [=type (realize {} actual)
+           :let [_ (prn '=type =type)]]
+      (solve expected =type))
+
+    [[::rec-call ?ctor ?env ?params] _]
+    (exec [:let [_ (prn '?ctor ?ctor ?params)]
+           =type-fn (realize {} ?ctor)
+           :let [_ (prn 'rec-call/=type-fn =type-fn)]
+           =params (map-m (partial realize ?env) ?params)
+           :let [_ (prn '=params =params)]
+           =type (apply =type-fn =params)
+           :let [_ (prn 'rec-call/=type =type)]]
+      (solve =type actual))
+
+    [_ [::rec-call ?ctor ?env ?params]]
+    (exec [:let [_ (prn '?ctor ?ctor ?params)]
+           =type-fn (realize {} ?ctor)
+           :let [_ (prn 'rec-call/=type-fn =type-fn)]
+           =params (map-m (partial realize ?env) ?params)
+           :let [_ (prn '=params =params)]
+           =type (apply =type-fn =params)
+           :let [_ (prn 'rec-call/=type =type)]]
+      (solve expected =type))
+
     [[::union ?types] _]
     (exec [=type (return-all ?types)
            _ (solve =type actual)]
@@ -387,6 +424,7 @@
 
 ;; Monads / Type-functions
 (defn ^:private realize [bindings type]
+  (prn 'realize bindings type)
   (match type
     [::object ?class ?params]
     (exec [=params (map-m (partial realize bindings) ?params)]
@@ -416,6 +454,15 @@
 
     [::all ?env ?params ?type-def]
     (return [::all (merge bindings ?env) ?params ?type-def])
+
+    [::rec ?name ?type-def]
+    (do ;; (prn 'realize `[::rec ~?name ~?type-def])
+      (realize (merge bindings {?name type}) ?type-def))
+
+    [::rec-call ?fn ?env ?params]
+    (let [=rec-fn (get bindings ?fn)]
+      (exec [=params (map-m (partial realize bindings) ?params)]
+        (return [::rec-call =rec-fn bindings ?params])))
     
     :else
     (return type)
@@ -428,8 +475,15 @@
        params))
 
 (defn apply [type-fn params]
-  ;; (prn 'apply type-fn params)
+  (prn 'apply type-fn params)
   (match type-fn
+    [::alias ?name ?def]
+    (apply ?def params)
+    
+    [::rec ?name ?type-def]
+    (exec [=type-fn (realize {?name type-fn} type-fn)]
+      (apply =type-fn params))
+    
     [::all ?env ?params ?type-def]
     (do ;; (prn `(~'= ~(count ?params) ~(count params))
         ;;      (into ?env (map vector (prepare-params ?params) params)))

@@ -484,10 +484,59 @@
                 (if (map? x)
                   x
                   "YOLO")))
+
+            (Test)
+            (do (defalias Test
+                  (Rec [x]
+                       (Or java.lang.Long (clojure.lang.PersistentList x))))
+              (ann list (Fn (All [x] [x -> (clojure.lang.PersistentList x)])))
+              (ann as-test (Fn (All [[a < Test]] [a -> a])))
+              (as-test 10))
+
+            (Test)
+            (do (defalias Test
+                  (Rec [x]
+                       (Or java.lang.Long (clojure.lang.PersistentList x))))
+              (ann list (Fn (All [x] [x -> (clojure.lang.PersistentList x)])))
+              (ann as-test (Fn (All [[a < Test]] [a -> a])))
+              (as-test (list 10)))
+
+            (Test)
+            (do (defalias Test
+                  (Rec [x]
+                       (Or java.lang.Long (clojure.lang.PersistentList x))))
+              (ann list (Fn (All [x] [x -> (clojure.lang.PersistentList x)])))
+              (ann as-test (Fn (All [[a < Test]] [a -> a])))
+              (as-test (list (list 10))))
+
+            ()
+            (do (defalias Test
+                  (Rec [x]
+                       (Or java.lang.Long (clojure.lang.PersistentList x))))
+              (ann list (Fn (All [x] [x -> (clojure.lang.PersistentList x)])))
+              (ann as-test (Fn (All [[a < Test]] [a -> a])))
+              (as-test (list (list "10"))))
+
+            ((Or java.lang.Long (clojure.lang.PersistentList (ctor elem))))
+            (do (defalias Test
+                  (Rec [ctor]
+                       (All [elem]
+                            (Or elem (clojure.lang.PersistentList (ctor elem))))))
+              (ann list (Fn (All [x] [x -> (clojure.lang.PersistentList x)])))
+              (ann as-test (Fn (All [[a < (Test java.lang.Long)]] [a -> a])))
+              (as-test 10))
+
+            ((Or java.lang.Long (clojure.lang.PersistentList (ctor elem))))
+            (do (defalias Test
+                  (Rec [ctor]
+                       (All [elem]
+                            (Or elem (clojure.lang.PersistentList (ctor elem))))))
+              (ann list (Fn (All [x] [x -> (clojure.lang.PersistentList x)])))
+              (ann as-test (Fn (All [[a < (Test java.lang.Long)]] [a -> a])))
+              (as-test (list (list 10))))
             )))
 
   
-  ;; MISSING: Recursive types
   ;; MISSING: Primitive types.
   ;; MISSING: Arrays and Xor types
   ;; MISSING: set! special form.
@@ -504,6 +553,19 @@
   ;; MISSING: Solving functions
   ;; MISSING: 
 
+  (do (defn combinations [elems]
+        (distinct (for [head elems
+                        tail (for [entry (cons #{head} (combinations (disj elems head)))]
+                               (conj entry head))]
+                    tail)))
+    (combinations #{1 2 3}))
+
+  (#{1} #{1 2} #{1 3} #{1 2 3} #{2} #{2 3} #{3}) ;; Expected
+  (#{1} #{1 2} #{1 3} #{1 2 3} #{2} #{2 3} #{3}) ;; Actual
+  
+  
+
+  
   
   
   (run '(do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))

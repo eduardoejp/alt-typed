@@ -58,6 +58,7 @@
          args))
 
 (defn parse-type-def [local-syms type-def]
+  (prn 'parse-type-def local-syms type-def)
   (match type-def
     nil
     (return [::&types/nil])
@@ -133,16 +134,14 @@
       (return [::&types/eff *data *effs]))
     
     (?name :guard symbol?)
-    (case (get local-syms ?name)
-      :var
-      (return ?name)
+    (do ;; (prn '(get local-syms ?name) ?name (get local-syms ?name) local-syms)
+      (case (get local-syms ?name)
+        (:var :rec)
+        (return ?name)
 
-      ;; :rec
-      ;; (return [::&types/rec ?name])
-
-      nil
-      (&util/with-field :types
-        (&types/resolve ?name)))
+        nil
+        (&util/with-field :types
+          (&types/resolve ?name))))
     
     (['quote [& ?elems]] :seq)
     (exec [=elems (map-m (partial parse-type-def local-syms) ?elems)]
@@ -180,10 +179,28 @@
                                 ?def)]
       (return [::&types/all {} *params *def]))
 
+    (['Rec (?local-name :guard vector?) ?def] :seq)
+    (if (and (= 1 (count ?local-name))
+             (symbol? (first ?local-name)))
+      (let [[?local-name] ?local-name
+            ;; _ (prn '?local-name ?local-name)
+            ]
+        (exec [=def (parse-type-def (assoc local-syms ?local-name :rec) ?def)
+               ;; :let [_ (prn '=def =def)]
+               ]
+          (return [::&types/rec ?local-name =def])))
+      zero)
+    
     ([?fn & ?params] :seq)
-    (exec [=type-fn (parse-type-def local-syms ?fn)
-           =params (map-m (partial parse-type-def local-syms) ?params)]
-      (&types/apply =type-fn =params))
+    (exec [=params (map-m (partial parse-type-def local-syms) ?params)
+           ;; :let [_ (prn '?fn ?fn '?params ?params =params)]
+           ]
+      (if (= :rec (get local-syms ?fn))
+        (return [::&types/rec-call ?fn {} =params])
+        (exec [=type-fn (parse-type-def local-syms ?fn)
+               ;; :let [_ (prn '=type-fn =type-fn)]
+               ]
+          (&types/apply =type-fn =params))))
     ))
 
 ;; Functions
@@ -417,8 +434,8 @@
                         [?ctor []]
                         [(first ?ctor) (vec (rest ?ctor))])]
       (exec [*type-def (if (empty? args)
-                         (parse-type-def {name :rec} ?type-def)
-                         (parse-type-def (into {name :rec} (for [p args] [p :var]))
+                         (parse-type-def {} ?type-def)
+                         (parse-type-def (into {} (for [p args] [p :var]))
                                          ?type-def))
              :let [*type-def (if (empty? args)
                                [::&types/alias name *type-def]
