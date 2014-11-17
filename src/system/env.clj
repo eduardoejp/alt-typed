@@ -16,15 +16,10 @@
 
 (defn ^:private create-ns [name]
   (fn [^Env state]
-    (cond (-> state ^NS (.-ns-current) .-name (= name))
-          (list [state nil])
-
-          (-> state .-ns-others (contains? name))
-          (list [state nil])
-
-          :else
-          (list [(update-in state [:ns-others] assoc name (fresh-ns name)) nil]))
-    ))
+    (if (or (-> state ^NS (.-ns-current) .-name (= name))
+            (-> state .-ns-others (contains? name)))
+      (list [state nil])
+      (list [(update-in state [:ns-others] assoc name (fresh-ns name)) nil]))))
 
 (defn ^:private enter-ns [name]
   (fn [^Env state]
@@ -35,7 +30,7 @@
           (list [(assoc state :ns-current (-> state .-ns-others (get name))) nil])
 
           :else
-          (list nil))
+          '())
     ))
 
 ;; [Interface]

@@ -486,41 +486,40 @@
                   "YOLO")))
             )))
 
-  (run '(do (ann identity (Fn (All [x] [x -> x])))
-          (identity "YOLO")))
+  
 
   ;; MISSING: Recursive types
   ;; MISSING: Primitive types.
   ;; MISSING: Arrays and Xor types
-  ;; MISSING: def(protocol|type|record), proxy & reify
+  ;; MISSING: set! special form.
   ;; MISSING: multimethods
+  ;; MISSING: Error messages.
+  ;; MISSING: def(protocol|type|record), proxy & reify, extend-protocol & family.
   ;; MISSING: gen-class
   ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.
   ;; MISSING: var-args
   ;; MISSING: macro-expansion.
   ;; MISSING: Scope handling (public vs private)
-  ;; MISSING: set! special form.
   ;; MISSING: Pre-inference annotating.
   ;; MISSING: Solving functions
-  ;; MISSING: Error messages.
   ;; MISSING: 
 
   
   
-  (run '(do (ann class (All [c] [c -> (java.lang.Class c)]))
+  (run '(do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
           (defmulti obj->string class)
           (defmethod obj->string java.lang.String [_]
             "It's a string!")
           obj->string))
 
-  (run '(do (ann class (All [c] [c -> (java.lang.Class c)]))
+  (run '(do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
           (defmulti obj->string class)
           (defmethod obj->string java.lang.String [_]
             "It's a string!")
           (obj->string "yolo")))
 
-  (run '(do (ann class (All [c] [c -> (java.lang.Class c)]))
+  (run '(do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
           (defmulti obj->string class)
           (defmethod obj->string java.lang.String [_]
             "It's a string!")
@@ -529,14 +528,14 @@
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
   ;; Gotta make holes on check*, instead of on ::let
-  (run '(do (ann get-object [-> java.lang.Object])
+  (run '(do (ann get-object (Fn [-> java.lang.Object]))
           (ann use-case (Fn [java.lang.String -> :yolo]
                             [java.lang.Integer -> :lol]
                             [java.lang.Boolean -> :meme]))
           (fn foo []
             (use-case (get-object)))))
 
-  (run '(do (ann get-object [-> java.lang.Object])
+  (run '(do (ann get-object (Fn [-> java.lang.Object]))
           (ann use-case (Fn [String -> :yolo]
                             [Integer -> :lol]
                             [Boolean -> :meme]))
@@ -553,12 +552,25 @@
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
-  (run '(do (ann inc [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer])
-          (ann < [java.lang.Number java.lang.Number -> java.lang.Boolean])
+  (run '(do (ann inc (Fn [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer]))
+          (ann < (Fn [java.lang.Number java.lang.Number -> java.lang.Boolean]))
           (loop [cnt 0]
             (if (< cnt 10)
               (recur (inc cnt))
               :done))))
+
+  (run '(do (ann inc (Fn [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer]))
+          (ann < (Fn [java.lang.Number java.lang.Number -> java.lang.Boolean]))
+          (fn [cnt]
+            (if (< cnt 10)
+              (recur (inc cnt))
+              :done))))
+
+  (run '(do (ann inc (Fn [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer]))
+          (ann < (Fn [java.lang.Number java.lang.Number -> java.lang.Boolean]))
+          (let [cnt 0]
+            (< cnt 10)
+            (inc cnt))))
 
   
   ;; This is a valid way of implementing letfn using a macro...

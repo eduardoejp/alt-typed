@@ -706,6 +706,91 @@
     :else
     (return {})))
 
+(defn prettify [mappings type]
+  (match type
+    [::hole _]
+    (if-let [var-name (get mappings type)]
+      (return var-name)
+      (exec [=type (normalize-hole type)]
+        (if-let [var-name (get mappings =type)]
+          (return var-name)
+          ;; (exec [[=top =bottom] (&util/with-field :types
+          ;;                         (&type/get-hole =type))
+          ;;        ;; =top (prettify-type mappings =top)
+          ;;        ;; =bottom (prettify-type mappings =bottom)
+          ;;        ;; _ (&util/with-field :types
+          ;;        ;;     (&type/narrow-hole type =top =bottom))
+          ;;        ]
+          ;;   ;; (return type)
+          ;;   (prettify-type mappings =top))
+          (exec [[=top =bottom] (get-hole =type)
+                 ;; :let [_ (prn 'Prettifying =type =top =bottom)]
+                 ]
+            (if (and (= +any+ =top)
+                     (not= +nothing+ =bottom))
+              (prettify mappings =bottom)
+              (prettify mappings =top)))
+          )))
+    
+    [::object ?class ?params]
+    (exec [=params (map-m (partial prettify mappings) ?params)]
+      (return [::object ?class =params]))
+
+    [::union ?types]
+    (exec [=types (map-m (partial prettify mappings) ?types)]
+      (reduce-m $or +nothing+ =types))
+
+    [::complement ?type]
+    (exec [=type (prettify mappings ?type)]
+      (return [::complement =type]))
+
+    [::function ?arities]
+    (exec [=arities (map-m (partial prettify mappings) ?arities)]
+      (return [::function =arities]))
+
+    [::arity ?args ?body]
+    (exec [=args (map-m (partial prettify mappings) ?args)
+           =body (prettify mappings ?body)]
+      (return [::arity =args =body]))
+    
+    :else
+    (return type)))
+
+(defn clean-env [to-clean type]
+  (match type
+    [::hole _]
+    (exec [[=top =bottom] (get-hole type)
+           =top (clean-env to-clean =top)
+           =bottom (clean-env to-clean =bottom)
+           ;; :let [_ (prn 'clean-env type =top =bottom)]
+           ]
+      (if (contains? to-clean type)
+        (return (cond (= +nothing+ =bottom)
+                      =top
+                      
+                      (= +any+ =top)
+                      =bottom
+
+                      :else
+                      =top))
+        (exec [_ (narrow-hole type =top =bottom)]
+          (return type))))
+    
+    [::object ?class ?params]
+    (exec [=params (map-m (partial clean-env to-clean) ?params)]
+      (return [::object ?class =params]))
+
+    [::union ?types]
+    (exec [=types (map-m (partial clean-env to-clean) ?types)]
+      (reduce-m $or +nothing+ =types))
+
+    [::complement ?type]
+    (exec [=type (clean-env to-clean ?type)]
+      (return [::complement =type]))
+    
+    :else
+    (return type)))
+
 (defn $tuple [elems]
   (return [::tuple (vec elems)]))
 

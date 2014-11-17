@@ -13,50 +13,13 @@
 (defrecord Context [env types])
 
 ;; [Utils]
-(defn ^:private clean-env [to-clean type]
-  (match type
-    [::&type/hole _]
-    (exec [[=top =bottom] (&util/with-field :types
-                            (&type/get-hole type))
-           =top (clean-env to-clean =top)
-           =bottom (clean-env to-clean =bottom)
-           ;; :let [_ (prn 'clean-env type =top =bottom)]
-           ]
-      (if (contains? to-clean type)
-        (return (cond (= &type/+nothing+ =bottom)
-                      =top
-                      
-                      (= &type/+any+ =top)
-                      =bottom
-
-                      :else
-                      =top))
-        (exec [_ (&util/with-field :types
-                   (&type/narrow-hole type =top =bottom))]
-          (return type))))
-    
-    [::&type/object ?class ?params]
-    (exec [=params (map-m (partial clean-env to-clean) ?params)]
-      (return [::&type/object ?class =params]))
-
-    [::&type/union ?types]
-    (exec [=types (map-m (partial clean-env to-clean) ?types)]
-      (&util/with-field :types
-        (reduce-m &type/$or &type/+nothing+ =types)))
-
-    [::&type/complement ?type]
-    (exec [=type (clean-env to-clean ?type)]
-      (return [::&type/complement =type]))
-    
-    :else
-    (return type)))
-
 (defn with-env [env inner]
   (exec [:let [bound-ids (-> env vals set)]
          _ (&util/with-field :env
              (&env/enter env))
          =type* inner
-         =type (clean-env bound-ids =type*)
+         =type (&util/with-field :types
+                 (&type/clean-env bound-ids =type*))
          _ (&util/with-field :env
              &env/exit)]
     (return =type)))
@@ -69,59 +32,6 @@
          _ (&util/with-field :env
              &env/exit)]
     (return =type)))
-
-(defn ^:private prettify-type [mappings type]
-  (match type
-    [::&type/hole _]
-    (if-let [var-name (get mappings type)]
-      (return var-name)
-      (exec [=type (&util/with-field :types
-                     (&type/normalize-hole type))]
-        (if-let [var-name (get mappings =type)]
-          (return var-name)
-          ;; (exec [[=top =bottom] (&util/with-field :types
-          ;;                         (&type/get-hole =type))
-          ;;        ;; =top (prettify-type mappings =top)
-          ;;        ;; =bottom (prettify-type mappings =bottom)
-          ;;        ;; _ (&util/with-field :types
-          ;;        ;;     (&type/narrow-hole type =top =bottom))
-          ;;        ]
-          ;;   ;; (return type)
-          ;;   (prettify-type mappings =top))
-          (exec [[=top =bottom] (&util/with-field :types
-                                  (&type/get-hole =type))
-                 ;; :let [_ (prn 'Prettifying =type =top =bottom)]
-                 ]
-            (if (and (= &type/+any+ =top)
-                     (not= &type/+nothing+ =bottom))
-              (prettify-type mappings =bottom)
-              (prettify-type mappings =top)))
-          )))
-    
-    [::&type/object ?class ?params]
-    (exec [=params (map-m (partial prettify-type mappings) ?params)]
-      (return [::&type/object ?class =params]))
-
-    [::&type/union ?types]
-    (exec [=types (map-m (partial prettify-type mappings) ?types)]
-      (&util/with-field :types
-        (reduce-m &type/$or &type/+nothing+ =types)))
-
-    [::&type/complement ?type]
-    (exec [=type (prettify-type mappings ?type)]
-      (return [::&type/complement =type]))
-
-    [::&type/function ?arities]
-    (exec [=arities (map-m (partial prettify-type mappings) ?arities)]
-      (return [::&type/function =arities]))
-
-    [::&type/arity ?args ?body]
-    (exec [=args (map-m (partial prettify-type mappings) ?args)
-           =body (prettify-type mappings ?body)]
-      (return [::&type/arity =args =body]))
-    
-    :else
-    (return type)))
 
 (let [+var-names+ (for [idx (iterate inc 1)
                         alphabet "abcdefghijklmnopqrstuvwxyz"]
@@ -150,7 +60,8 @@
                                           poly-vars used-vars))
                    ;; _ (prn 'mappings mappings)
                    rev-mappings (set/map-invert mappings)]
-             arity* (prettify-type mappings arity)]
+             arity* (&util/with-field :types
+                      (&type/prettify mappings arity))]
         (if (empty? used-vars)
           (return arity*)
           (exec [user-vars* (map-m (fn [uv]
@@ -192,18 +103,6 @@
                       )]
           (concat batch ((merge-arities left) state))))
       )))
-
-(defrecord ClassTypeCtor [class args])
-
-(defn qualify [prefix body]
-  (symbol (name prefix) (name body)))
-
-(defn ^:private ann-class [class parents]
-  (exec [ns (&util/with-field :env
-              &env/current-ns)
-         _ (&util/with-field :types
-             (&type/define-class (qualify ns (:class class)) (map :class parents)))]
-    (return &type/+nil+)))
 
 (defn check* [form]
   (match form
@@ -681,7 +580,8 @@
 ;; Functions
 (defn check [form]
   #(let [results ((exec [type (check* form)]
-                    (prettify-type nil type)) %)]
+                    (&util/with-field :types
+                      (&type/prettify nil type))) %)]
      (if (empty? results)
        '()
        (do ;; (prn '(count results) (count results) (mapv second results))
