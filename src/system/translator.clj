@@ -4,7 +4,7 @@
 
 ;; Functions
 (defn type->code [type]
-  (prn 'type->code type)
+  ;; (prn 'type->code type)
   (match type
     [::&type/any]
     'Any
@@ -76,4 +76,7 @@
 
     [::&type/rec-call [::&type/rec ?name ?def] ?env ?params]
     `(~?name ~@?params)
+
+    [::&type/primitive ?type]
+    (-> ?type name symbol)
     ))

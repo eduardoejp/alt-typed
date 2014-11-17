@@ -534,10 +534,31 @@
               (ann list (Fn (All [x] [x -> (clojure.lang.PersistentList x)])))
               (ann as-test (Fn (All [[a < (Test java.lang.Long)]] [a -> a])))
               (as-test (list (list 10))))
+
+            (java.lang.Integer)
+            (do (ann yolo int)
+              (ann f (Fn [int -> java.lang.Integer]))
+              (f yolo))
+
+            (int)
+            (do (ann yolo int)
+              (ann f (Fn [java.lang.Integer -> int]))
+              (f yolo))
+
+            (int)
+            (do (ann yolo java.lang.Integer)
+              (ann f (Fn [java.lang.Integer -> int]))
+              (f yolo))
+
+            ()
+            (do (ann yolo java.lang.Integer)
+              (ann f (Fn [int -> java.lang.Integer]))
+              (f yolo))
             )))
 
   
-  ;; MISSING: Primitive types.
+  
+  
   ;; MISSING: Arrays and Xor types
   ;; MISSING: set! special form.
   ;; MISSING: multimethods
@@ -551,8 +572,11 @@
   ;; MISSING: Scope handling (public vs private)
   ;; MISSING: Pre-inference annotating.
   ;; MISSING: Solving functions
+  ;; MISSING: Multi-arity fns.
+  ;; MISSING: Take into account primitive type-tags and return type-tags.
+  ;; MISSING: (Or Object nil) < Ref|Pointer, to constrain class-type args to avoid them being polymorphic over native types (which can happen with Any)
   ;; MISSING: 
-
+  
   (do (defn combinations [elems]
         (distinct (for [head elems
                         tail (for [entry (cons #{head} (combinations (disj elems head)))]
@@ -564,7 +588,7 @@
   (#{1} #{1 2} #{1 3} #{1 2 3} #{2} #{2 3} #{3}) ;; Actual
   
   
-
+  
   
   
   
@@ -610,6 +634,8 @@
           ))
 
   ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
+  ;; TODO: The missing aesthetic changes on recursive types for correct translation + inference.
+  ;; TODO: Correct the inference issue with defmethod.
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
