@@ -58,7 +58,7 @@
          args))
 
 (defn parse-type-def [local-syms type-def]
-  (prn 'parse-type-def local-syms type-def)
+  ;; (prn 'parse-type-def local-syms type-def)
   (match type-def
     nil
     (return [::&types/nil])
@@ -131,11 +131,20 @@
 
     'Macro
     (return [::&types/macro])
+
+    (['Array ?type] :seq)
+    (exec [*type (parse-type-def local-syms ?type)]
+      (&types/$array *type))
     
     (['Or ?param & ?params] :seq)
     (exec [[*type & *types] (map-m (partial parse-type-def local-syms) (cons ?param ?params))]
       (&util/with-field :types
         (reduce-m &types/$or *type *types)))
+
+    (['Xor ?param & ?params] :seq)
+    (exec [[*type & *types] (map-m (partial parse-type-def local-syms) (cons ?param ?params))]
+      (&util/with-field :types
+        (reduce-m &types/$xor *type *types)))
 
     (['And ?param & ?params] :seq)
     (exec [[*type & *types] (map-m (partial parse-type-def local-syms) (cons ?param ?params))]

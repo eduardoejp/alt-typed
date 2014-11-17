@@ -554,12 +554,34 @@
             (do (ann yolo java.lang.Integer)
               (ann f (Fn [int -> java.lang.Integer]))
               (f yolo))
+
+            (Primitive)
+            (do (ann short-array (Fn [java.lang.Long -> (Array short)]))
+              (defalias Primitive (Xor boolean byte short int long float double char))
+              (ann aget (Fn (All [[x < Primitive]] [(Array x) java.lang.Long -> x])))
+              (aget (short-array 10) 0))
+
+            (short)
+            (do (ann short-array (Fn [java.lang.Long -> (Array short)]))
+              (defalias Primitive (Xor boolean byte short int long float double char))
+              (ann aget (Fn (All [x] [(Array x) java.lang.Long -> x])))
+              (aget (short-array 10) 0))
+
+            ((Fn (All [a] [(Array a) -> a])))
+            (do (ann short-array (Fn [java.lang.Long -> (Array short)]))
+              (defalias Primitive (Xor boolean byte short int long float double char))
+              (ann aget (Fn (All [x] [(Array x) java.lang.Long -> x])))
+              ;; (aget (short-array 10) 0)
+              (fn [x]
+                (aget x 0)))
             )))
 
   
   
+
   
-  ;; MISSING: Arrays and Xor types
+  
+  
   ;; MISSING: set! special form.
   ;; MISSING: multimethods
   ;; MISSING: Error messages.

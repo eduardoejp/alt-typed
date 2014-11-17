@@ -260,7 +260,7 @@
     ))
 
 (defn solve [expected actual]
-  ;; (prn 'solve expected actual)
+  (prn 'solve expected actual)
   (match [expected actual]
     [[::hole ?e-id] [::hole ?a-id]]
     (if (= ?e-id ?a-id)
@@ -362,6 +362,9 @@
         (return true))
       zero)
 
+    [[::array ?e-type] [::array ?a-type]]
+    (solve ?e-type ?a-type)
+
     [[::object ?e-class ?e-params] [::tuple ?a-parts]]
     (exec [=elems (reduce-m $or [::nothing] ?a-parts)]
       (solve expected [::object 'clojure.lang.IPersistentVector [=elems]]))
@@ -412,6 +415,16 @@
            :let [_ (prn 'rec-call/=type =type)]]
       (solve expected =type))
 
+    [_ [::xor ?types]]
+    (exec [_ (map-m #(solve expected %) ?types)]
+      (return true))
+
+    [[::xor ?types] _]
+    (exec [worlds (&util/collect (exec [=type (return-all ?types)]
+                                   (solve =type actual)))
+           :when (= 1 (count worlds))]
+      (&util/spread worlds))
+    
     [[::union ?types] _]
     (exec [=type (return-all ?types)
            _ (solve =type actual)]
@@ -446,6 +459,10 @@
     [::object ?class ?params]
     (exec [=params (map-m (partial realize bindings) ?params)]
       (return [::object ?class (vec =params)]))
+
+    [::array ?type]
+    (exec [=type (realize bindings ?type)]
+      (return [::array =type]))
     
     [::union ?types]
     (exec [=types (map-m (partial realize bindings) ?types)]
@@ -605,11 +622,35 @@
       ))
 
   $or  ::union        base     addition :parent :child
+  $xor ::xor          base     addition :parent :child
   ;; $and ::intersection addition base     :child  :parent
   )
 
 (defn $and [base addition]
   (match [base addition]
+    [_ [::xor ?addition]]
+    (exec [=refinement (return-all ?addition)]
+      (&util/try-all [(exec [_ (solve base =refinement)
+                             ;; :let [_ (prn "Case #1")]
+                             ]
+                        (return =refinement))
+                      (exec [_ (solve =refinement base)
+                             ;; :let [_ (prn "Case #2")]
+                             ]
+                        (return base))
+                      (match [base =refinement]
+                        [[::object ?filter _] [::object ?refinement _]]
+                        (exec [?1 (interface? ?filter)
+                               ?2 (interface? ?refinement)
+                               ;; :let [_ (prn "Case #3..." ?filter ?1 ?refinement ?2)]
+                               :when (and ?1 ?2)
+                               ;; :let [_ (prn "Case #3")]
+                               ]
+                          ($and base =refinement))
+                        
+                        :else
+                        (return base))]))
+    
     [_ [::union ?addition]]
     (reduce-m (fn [=filter =refinement]
                 ;; (prn '[AND] =filter =refinement)
@@ -776,6 +817,9 @@
     (exec [all-holes (map-m holes ?args)
            return-holes (holes ?return)]
       (return (clojure.core/apply merge-with + return-holes all-holes)))
+
+    [::array ?type]
+    (holes ?type)
     
     :else
     (return {})))
@@ -809,6 +853,10 @@
     [::object ?class ?params]
     (exec [=params (map-m (partial prettify mappings) ?params)]
       (return [::object ?class =params]))
+
+    [::array ?type]
+    (exec [=type (prettify mappings ?type)]
+      (return [::array =type]))
 
     [::union ?types]
     (exec [=types (map-m (partial prettify mappings) ?types)]
@@ -853,6 +901,10 @@
     [::object ?class ?params]
     (exec [=params (map-m (partial clean-env to-clean) ?params)]
       (return [::object ?class =params]))
+
+    [::array ?type]
+    (exec [=type (clean-env to-clean ?type)]
+      (return [::array =type]))
 
     [::union ?types]
     (exec [=types (map-m (partial clean-env to-clean) ?types)]
@@ -909,3 +961,6 @@
 (defn $primitive [type]
   (assert (contains? #{:boolean :byte :short :int :long :float :double :char} type))
   (return [::primitive type]))
+
+(defn $array [type]
+  (return [::array type]))

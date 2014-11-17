@@ -28,6 +28,9 @@
     [::&type/union ?types]
     `(~'Or ~@(map type->code ?types))
 
+    [::&type/xor ?types]
+    `(~'Xor ~@(map type->code ?types))
+
     [::&type/intersection ?types]
     `(~'And ~@(map type->code ?types))
     
@@ -42,6 +45,9 @@
 
     [::&type/macro]
     'Macro
+
+    [::&type/array ?type]
+    `(~'Array ~(type->code ?type))
 
     [::&type/tuple ?elems]
     `'~(mapv type->code ?elems)
