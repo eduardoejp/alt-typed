@@ -248,7 +248,7 @@
     ))
 
 (defn solve [expected actual]
-  (prn 'solve expected actual)
+  ;; (prn 'solve expected actual)
   (match [expected actual]
     [[::hole ?e-id] [::hole ?a-id]]
     (if (= ?e-id ?a-id)
@@ -419,11 +419,11 @@
        params))
 
 (defn apply [type-fn params]
-  (prn 'apply type-fn params)
+  ;; (prn 'apply type-fn params)
   (match type-fn
     [::all ?env ?params ?type-def]
-    (do (prn `(~'= ~(count ?params) ~(count params))
-             (into ?env (map vector (prepare-params ?params) params)))
+    (do ;; (prn `(~'= ~(count ?params) ~(count params))
+        ;;      (into ?env (map vector (prepare-params ?params) params)))
       (if (= (count ?params) (count params))
         (realize (into ?env (map vector (prepare-params ?params) params))
                  ?type-def)
@@ -444,11 +444,12 @@
                                     _ (narrow-hole =hole ?top [::nothing])]
                                (return =hole)))
                           ?params)
-           :let [_ (prn '=params =params)]
+           ;; :let [_ (prn '=params =params)]
            =params* (map-m #(exec [[=top _] (get-hole %)]
                               (return =top))
                            =params)
-           :let [_ (prn '=params* =params*)]]
+           ;; :let [_ (prn '=params* =params*)]
+           ]
       (apply type =params))
     
     :else

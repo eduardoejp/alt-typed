@@ -128,7 +128,8 @@
           ;;   (prettify-type mappings =top))
           (exec [[=top =bottom] (&util/with-field :types
                                   (&type/get-hole =type))
-                 :let [_ (prn 'Prettifying =type =top =bottom)]]
+                 ;; :let [_ (prn 'Prettifying =type =top =bottom)]
+                 ]
             (if (and (= [::&type/any] =top)
                      (not= [::&type/nothing] =bottom))
               (prettify-type mappings =bottom)
@@ -165,7 +166,8 @@
     [::&type/hole _]
     (exec [[=top =bottom] (&util/with-field :types
                             (&type/get-hole type))
-           :let [_ (prn 'Grounding type =top =bottom)]]
+           ;; :let [_ (prn 'Grounding type =top =bottom)]
+           ]
       (if (and (= [::&type/any] =top)
                (not= [::&type/nothing] =bottom))
         (ground-type =bottom)
@@ -587,23 +589,24 @@
 
     [::&parser/defmethod ?name ?dispatch-val ?args ?body]
     (exec [=multi-fn (check* [::&parser/symbol ?name])
-           :let [_ (prn "#1" =multi-fn)]]
+           ;; :let [_ (prn "#1" =multi-fn)]
+           ]
       (match =multi-fn
         [::&type/multi-fn ?dispatch-fn ?methods]
         (exec [=args (&util/with-field :types
                        (map-m (constantly &type/fresh-hole) ?args))
-               :let [_ (prn "#2")]
+               ;; :let [_ (prn "#2")]
                =dispatch-val (check* ?dispatch-val)
-               :let [_ (prn "#3")]
+               ;; :let [_ (prn "#3")]
                =return (fn-call ?dispatch-fn =args)
-               :let [_ (prn "#4")]
+               ;; :let [_ (prn "#4")]
                _ (&util/with-field :types
                    (&type/solve =return =dispatch-val))
-               :let [_ (prn "#5" =return =dispatch-val =args)]
+               ;; :let [_ (prn "#5" =return =dispatch-val =args)]
                worlds (&util/collect (exec [=return (with-env* (into {} (map vector ?args =args))
                                                       (check* ?body))]
                                        (generalize-arity [::&type/arity =args =return])))
-               :let [_ (prn "#6")]
+               ;; :let [_ (prn "#6")]
                =new-multi-fn (if (empty? worlds)
                                zero
                                (exec [=arities (&util/collect (merge-arities worlds))
@@ -611,7 +614,8 @@
                                       _ (&util/with-field :env
                                           (&env/intern ?name =new-multi-fn))]
                                  (return =new-multi-fn)))
-               :let [_ (prn "#7")]]
+               ;; :let [_ (prn "#7")]
+               ]
           (&util/with-field :types
             (&type/instantiate* 'clojure.lang.Var [=new-multi-fn])))
 
@@ -655,15 +659,15 @@
                                [?pre-post `[::&parser/do ~@?forms]]
                                [nil ?body]))]
       (exec [all-pre (map-m #(&parser/parse `(~'assert ~%)) (:pre pre-post))
-             :let [_ (prn 'all-pre all-pre)]
+             ;; :let [_ (prn 'all-pre all-pre)]
              all-post (map-m #(&parser/parse `(~'assert ~%)) (:post pre-post))
-             :let [_ (prn 'all-post all-post)]
+             ;; :let [_ (prn 'all-post all-post)]
              worlds (&util/collect (exec [=args (&util/with-field :types
                                                   (map-m &type/fresh-var ?args))
-                                          :let [_ (println "Post =args")]
+                                          ;; :let [_ (println "Post =args")]
                                           _ (with-env* (into {} (map vector ?args =args))
                                               (map-m check* all-pre))
-                                          :let [_ (println "#1")]
+                                          ;; :let [_ (println "#1")]
                                           =return (if ?local-name
                                                     (exec [=fn (&util/with-field :types
                                                                  &type/fresh-hole)]
@@ -674,7 +678,8 @@
                                                       (check* ?body)))
                                           _ (with-env* {'% =return}
                                               (map-m check* all-post))
-                                          :let [_ (println "#2")]]
+                                          ;; :let [_ (println "#2")]
+                                          ]
                                      (generalize-arity [::&type/arity =args =return])))]
         (case (count worlds)
           0 zero
