@@ -234,9 +234,7 @@
           (exec [user-vars* (map-m (fn [uv]
                                      (exec [[=top =bottom] (&util/with-field :types
                                                              (&type/get-hole (get rev-mappings uv)))]
-                                       (return (if (= [::&type/any] =top)
-                                                 uv
-                                                 [uv '< =top]))))
+                                       (return [uv =top])))
                                    used-vars)]
             (return [::&type/all {} (vec user-vars*) arity*])))
         ))))
@@ -680,14 +678,10 @@
                                               (map-m check* all-post))
                                           ;; :let [_ (println "#2")]
                                           ]
-                                     (generalize-arity [::&type/arity =args =return])))]
-        (case (count worlds)
-          0 zero
-          1 (exec [=arity (&util/spread worlds)]
-              (return [::&type/function (list =arity)]))
-          ;; else
-          (exec [=arities (&util/collect (merge-arities worlds))]
-            (return [::&type/function (map second =arities)])))))
+                                     (generalize-arity [::&type/arity =args =return])))
+             :when (not (empty? worlds))]
+        (exec [=arities (&util/collect (merge-arities worlds))]
+          (return [::&type/function (map second =arities)]))))
     
     [::&parser/ann ?var ?type]
     (exec [_ (&util/with-field :env

@@ -412,9 +412,7 @@
 
 (defn prepare-params [params]
   (map #(match %
-          (?open :guard symbol?)
-          ?open
-          [?bounded '< ?top]
+          [?bounded ?top]
           ?bounded)
        params))
 
@@ -436,10 +434,7 @@
   (match type
     [::all _ ?params _]
     (exec [=params (map-m #(match %
-                             (?open :guard symbol?)
-                             fresh-hole
-                             
-                             [?bounded '< ?top]
+                             [?bounded ?top]
                              (exec [=hole fresh-hole
                                     _ (narrow-hole =hole ?top [::nothing])]
                                (return =hole)))

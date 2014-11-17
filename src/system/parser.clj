@@ -57,11 +57,11 @@
 (defn ^:private parse-poly-args [parse-type-def local-syms args]
   (map-m #(match %
             (?open :guard symbol?)
-            (return ?open)
+            (return [?open [::&types/any]])
             
             [?bounded '< ?top]
             (exec [=top (parse-type-def local-syms ?top)]
-              (return [?bounded '< =top])))
+              (return [?bounded =top])))
          args))
 
 (defn parse-type-def [local-syms type-def]

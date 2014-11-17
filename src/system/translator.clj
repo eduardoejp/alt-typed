@@ -63,11 +63,10 @@
     
     [::&type/all ?env ?vars ?poly]
     (let [vars* (mapv #(match %
-                         (?name :guard symbol?)
-                         ?name
-
-                         [(?name :guard symbol?) '< ?top]
-                         [?name '< (type->code ?top)])
+                         [(?name :guard symbol?) ?top]
+                         (if (= [::&type/any] ?top)
+                           ?name
+                           [?name '< (type->code ?top)]))
                       ?vars)]
       `(~'All ~vars* ~(type->code ?poly)))
 
