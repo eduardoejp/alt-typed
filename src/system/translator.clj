@@ -89,4 +89,9 @@
     [::&type/protocol ?name ?methods]
     `(~'Protocol ~?name ~(into {} (map (fn [[name type]] [name (type->code type)])
                                        ?methods)))
+
+    [::&type/reify ?impls]
+    `(~'Reify ~(into {} (map (fn [[context members]]
+                               [context (into {} (map (fn [[name type]] [name (type->code type)]) members))])
+                             ?impls)))
     ))

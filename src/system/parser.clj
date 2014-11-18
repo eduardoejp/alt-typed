@@ -529,7 +529,29 @@
                          [nil {}]
                          ?impls)]
       (return [::defrecord ?name ?args (nth *impls 1)]))
-    
+
+    (['reify & ?impls] :seq)
+    (let [*impls (reduce (fn [[context impls] token]
+                           (prn 'token token (class token))
+                           (if (symbol? token)
+                             [token impls]
+                             (let [[?name ?args & ?forms] token]
+                               [context (update-in impls [context ?name] conj [?args ?forms])])))
+                         [nil {}]
+                         ?impls)]
+      (return [::reify (nth *impls 1)]))
+
+    (['extend ?class & ?impls] :seq)
+    (let [*class (parse ?class)
+          *impls (reduce (fn [impls [context methods]]
+                           (reduce (fn [impls [name fn-code]]
+                                     (assoc-in impls [context (-> name clojure.core/name symbol)] fn-code))
+                                   impls
+                                   methods))
+                         {}
+                         (apply hash-map ?impls))]
+      (return [::extend ?class *impls]))
+
     ([?fn & ?args] :seq)
     (exec [*fn (parse ?fn)
            *args (map-m parse ?args)]

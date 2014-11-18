@@ -607,6 +607,50 @@
 
     [::&parser/defrecord ?class ?args ?impls]
     (check* [::&parser/deftype ?class ?args ?impls])
+
+    [::&parser/reify ?impls]
+    (exec [=impls (map-m (fn [[protocol methods]]
+                           (exec [=protocol (&util/with-field :env
+                                              (&env/resolve protocol))
+                                  =signatures (match =protocol
+                                                [::&type/protocol _ ?signatures]
+                                                (return ?signatures)
+                                                
+                                                :else
+                                                zero)
+                                  :when (= (set (keys =signatures)) (set (keys methods)))
+                                  =methods (map-m (fn [[f-name [[f-args f-body]]]]
+                                                    (exec [=f-type (check* [::&parser/fn f-name f-args `[::&parser/do ~@f-body]])]
+                                                      (return [f-name =f-type])))
+                                                  methods)
+                                  :let [=methods (into {} =methods)]]
+                             (return [protocol =methods])))
+                         ?impls)]
+      (return [::&type/reify =impls]))
+
+    [::&parser/extend ?class ?impls]
+    (exec [=impls (map-m (fn [[protocol methods]]
+                           (exec [=protocol (&util/with-field :env
+                                              (&env/resolve protocol))
+                                  =signatures (match =protocol
+                                                [::&type/protocol _ ?signatures]
+                                                (return ?signatures)
+                                                
+                                                :else
+                                                zero)
+                                  :when (= (set (keys =signatures)) (set (keys methods)))
+                                  =methods (map-m (fn [[f-name fn-code]]
+                                                    (exec [*fn-code (&parser/parse fn-code)
+                                                           =f-type (check* *fn-code)]
+                                                      (return [f-name =f-type])))
+                                                  methods)
+                                  :let [=methods (into {} =methods)]]
+                             (return [protocol =methods])))
+                         ?impls)
+           :let [=impls (into {} =impls)
+                 ;; _ (prn '=impls =impls)
+                 ]]
+      (return &type/+nil+))
     
     [::&parser/fn-call ?fn ?args]
     (if-let [[?class ?method] (match ?fn

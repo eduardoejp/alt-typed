@@ -633,21 +633,27 @@
               (defrecord Bar []
                 Foo
                 (foo [_] "BAR")))
+
+            ((Reify {Foo {foo (Fn [Any -> 17])}}))
+            (do (defprotocol Foo
+                  (foo [_]))
+              (reify Foo
+                (foo [self] 17)))
+
+            (nil)
+            (do (defprotocol Foo
+                  (foo [_]))
+              (extend java.lang.String
+                Foo
+                {:foo (fn [self] self)}))
             )))
 
   ;; (run ')
   
-  (run '(do (defprotocol Foo
-              (foo [_]))
-          (defrecord Bar []
-            Foo
-            (foo [_] "BAR"))))
-  
   
   
   ;; MISSING: Error messages.
-  ;; MISSING: proxy & reify, extend-protocol & family.
-  ;; MISSING: gen-class
+  ;; MISSING: gen-class & proxy
   ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.
   ;; MISSING: var-args
