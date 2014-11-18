@@ -8,7 +8,8 @@
                                             zero return return-all]])))
 
 (declare $or $and apply
-         solve realize)
+         solve realize
+         fresh-var)
 
 ;; [Data]
 (defrecord TypeHeap [counter mappings])
@@ -45,7 +46,7 @@
              [::hole id]]))))
 
 (defn get-hole [hole]
-  (prn 'get-hole hole)
+  ;; (prn 'get-hole hole)
   (match hole
     [::hole ?id]
     (fn [^Types state]
@@ -62,7 +63,7 @@
           '())))))
 
 (defn narrow-hole [hole top bottom]
-  (prn 'narrow-hole hole top bottom)
+  ;; (prn 'narrow-hole hole top bottom)
   (match hole
     [::hole ?id]
     (fn [state]
@@ -75,7 +76,7 @@
     ))
 
 (defn redirect-hole [from to]
-  (prn 'redirect-hole from to)
+  ;; (prn 'redirect-hole from to)
   (match [from to]
     [[::hole ?id] [::hole _]]
     (fn [state]
@@ -98,6 +99,11 @@
 
 (defn poly-fn [num-args]
   (exec [=args (map-m (constantly fresh-hole) (repeat num-args nil))
+         =return fresh-hole]
+    (return [::function (list [::arity (vec =args) =return])])))
+
+(defn poly-fn* [args]
+  (exec [=args (map-m fresh-var args)
          =return fresh-hole]
     (return [::function (list [::arity (vec =args) =return])])))
 
@@ -262,12 +268,14 @@
     ))
 
 (defn solve [expected actual]
-  (prn 'solve expected actual)
+  ;; (prn 'solve expected actual)
   (match [expected actual]
     [[::hole ?e-id] [::hole ?a-id]]
     (if (= ?e-id ?a-id)
       (return true)
-      (exec [[=top =bottom] (get-hole expected)
+      (exec [expected (normalize-hole expected)
+             actual (normalize-hole actual)
+             [=top =bottom] (get-hole expected)
              _ (solve =top actual)
              _ (solve actual =bottom)
              _ (redirect-hole expected actual)]
@@ -564,7 +572,8 @@
       :else  false))
   type-fn?  [::all _ _ _]
   multi-fn? [::multi-fn _ _]
-  type-var? [::hole _])
+  type-var? [::hole _]
+  protocol? [::protocol _ _])
 
 (defn instantiate*
   ([name]

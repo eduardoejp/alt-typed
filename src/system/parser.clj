@@ -168,13 +168,13 @@
     
     (?name :guard symbol?)
     (do ;; (prn '(get local-syms ?name) ?name (get local-syms ?name) local-syms)
-      (case (get local-syms ?name)
-        (:var :rec)
-        (return ?name)
+        (case (get local-syms ?name)
+          (:var :rec)
+          (return ?name)
 
-        nil
-        (&util/with-field :types
-          (&types/resolve ?name))))
+          nil
+          (&util/with-field :types
+            (&types/resolve ?name))))
     
     (['quote [& ?elems]] :seq)
     (exec [=elems (map-m (partial parse-type-def local-syms) ?elems)]
@@ -235,6 +235,19 @@
                ]
           (&types/apply =type-fn =params))))
     ))
+
+(defn ^:private parse-method [code]
+  (prn 'parse-method code)
+  (match code
+    ([(?name :guard symbol?) & arities+doc] :seq)
+    (let [arities (if (string? (last arities+doc))
+                    (butlast arities+doc)
+                    arities+doc)]
+      (assert (= 1 (count arities)))
+      (return [::pmethod ?name arities]))
+    
+    :else
+    zero))
 
 ;; Functions
 (defn parse [code]
@@ -488,6 +501,35 @@
     (exec [*body (parse `(do ~@ ?body))]
       (return [::fn nil ?args *body]))
 
+    (['defprotocol ?name & ?extra] :seq)
+    (let [[_ methods] (if (string? (first ?extra))
+                        [(first ?extra) (rest ?extra)]
+                        [nil ?extra])]
+      (exec [*methods (map-m parse-method ?extra)]
+        (return [::protocol ?name *methods])))
+
+    (['deftype ?name (?args :guard vector?) & ?impls] :seq)
+    (let [*impls (reduce (fn [[context impls] token]
+                           (prn 'token token (class token))
+                           (if (symbol? token)
+                             [token impls]
+                             (let [[?name ?args & ?forms] token]
+                               [context (update-in impls [context ?name] conj [?args ?forms])])))
+                         [nil {}]
+                         ?impls)]
+      (return [::deftype ?name ?args (nth *impls 1)]))
+
+    (['defrecord ?name (?args :guard vector?) & ?impls] :seq)
+    (let [*impls (reduce (fn [[context impls] token]
+                           (prn 'token token (class token))
+                           (if (symbol? token)
+                             [token impls]
+                             (let [[?name ?args & ?forms] token]
+                               [context (update-in impls [context ?name] conj [?args ?forms])])))
+                         [nil {}]
+                         ?impls)]
+      (return [::defrecord ?name ?args (nth *impls 1)]))
+    
     ([?fn & ?args] :seq)
     (exec [*fn (parse ?fn)
            *args (map-m parse ?args)]

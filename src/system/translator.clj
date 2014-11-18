@@ -85,4 +85,8 @@
 
     [::&type/primitive ?type]
     (-> ?type name symbol)
+
+    [::&type/protocol ?name ?methods]
+    `(~'Protocol ~?name ~(into {} (map (fn [[name type]] [name (type->code type)])
+                                       ?methods)))
     ))

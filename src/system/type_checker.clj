@@ -72,6 +72,12 @@
             (return [::&type/all {} (vec user-vars*) arity*])))
         ))))
 
+(defn generalize-function [type]
+  (match type
+    [::&type/function ?arities]
+    (exec [=arities (map-m generalize-arity ?arities)]
+      (return [::&type/function =arities]))))
+
 (defn ^:private merge-arities [worlds]
   (if (empty? worlds)
     zero
@@ -405,21 +411,21 @@
                        (map-m (constantly &type/fresh-hole) ?args))
                ;; :let [_ (prn "#2")]
                =dispatch-val (check* ?dispatch-val)
-               :let [_ (prn '=dispatch-val =dispatch-val)
-                     _ (prn '?dispatch-fn ?dispatch-fn)]
+               ;; :let [_ (prn '=dispatch-val =dispatch-val)
+               ;;       _ (prn '?dispatch-fn ?dispatch-fn)]
                ;; :let [_ (prn "#3")]
                =return (&util/with-field :types
                          (&type/fn-call ?dispatch-fn =args))
                ;; :let [_ (prn "#4")]
-               :let [_ (prn '=return =return)]
+               ;; :let [_ (prn '=return =return)]
                _ (&util/with-field :types
                    (&type/solve =return =dispatch-val))
                =return* (&util/with-field :types
                           (&type/prettify nil =return))
-               :let [_ (prn '=return* =return* '=dispatch-val =dispatch-val)]
+               ;; :let [_ (prn '=return* =return* '=dispatch-val =dispatch-val)]
                =args* (&util/with-field :types
                         (map-m (partial &type/prettify nil) =args))
-               :let [_ (prn '=args =args =args*)]
+               ;; :let [_ (prn '=args =args =args*)]
                ;; :let [_ (prn "#5" =return =dispatch-val =args)]
                worlds (&util/collect (exec [=return (with-env* (into {} (map vector ?args =args))
                                                       (check* ?body))]
@@ -558,6 +564,50 @@
       (&util/with-field :types
         (&type/fn-call =ctor =args)))
 
+    [::&parser/protocol ?var ?methods]
+    (exec [=methods (map-m (fn [method]
+                             (match method
+                               [::&parser/pmethod ?name ?arities]
+                               (exec [=fn (&util/with-field :types
+                                            (&type/poly-fn* (first ?arities)))
+                                      =fn (generalize-function =fn)]
+                                 (return [?name =fn]))))
+                           ?methods)
+           _ (&util/with-field :env
+               (&env/intern ?var [::&type/protocol ?var (into {} =methods)]))]
+      (&type/$literal ?var))
+
+    [::&parser/deftype ?class ?args ?impls]
+    (exec [=args (&util/with-field :types
+                   (map-m &type/fresh-var ?args))
+           :let [global-env (into {} (map vector ?args =args))]
+           =impls (with-env* global-env
+                    (map-m (fn [[protocol methods]]
+                             (exec [=protocol (&util/with-field :env
+                                                (&env/resolve protocol))
+                                    =signatures (match =protocol
+                                                  [::&type/protocol _ ?signatures]
+                                                  (return ?signatures)
+                                                  
+                                                  :else
+                                                  zero)
+                                    :when (= (set (keys =signatures)) (set (keys methods)))
+                                    =methods (map-m (fn [[f-name [[f-args f-body]]]]
+                                                      (exec [=f-type (check* [::&parser/fn f-name f-args `[::&parser/do ~@f-body]])]
+                                                        (return [f-name =f-type])))
+                                                    methods)
+                                    :let [=methods (into {} =methods)]]
+                               (return [protocol =methods])))
+                           ?impls))
+           :let [=impls (into {} =impls)]
+           :let [_ (println "#1")]
+           _ (check* [::&parser/ann-class [?class [] []] [] []])
+           :let [_ (println "#2")]]
+      (check* [::&parser/symbol ?class]))
+
+    [::&parser/defrecord ?class ?args ?impls]
+    (check* [::&parser/deftype ?class ?args ?impls])
+    
     [::&parser/fn-call ?fn ?args]
     (if-let [[?class ?method] (match ?fn
                                 [::&parser/symbol ?symbol]

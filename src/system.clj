@@ -12,54 +12,54 @@
             :reload
             ))
 
+(defonce _init_
+  (do ;; (alter-var-root #'clojure.core/prn
+      ;;                 (constantly #(.println System/out (apply pr-str %&))))
+      ))
+
+(let [[[context _] :as worlds] (&prelude/install &type-checker/+init+)]
+  (defn run [code]
+    (println "Code:" (pr-str code))
+    (let [monad (exec [parsed-code (&parser/parse code)]
+                  (&type-checker/check parsed-code))
+          types (map (comp &translator/type->code second)
+                     (monad context))]
+      (doseq [type types]
+        (->> type pr-str (println "Type:")))
+      (println "")
+      types)))
+
 (comment
-  (time (do (defonce _init_
-              (do ;; (alter-var-root #'clojure.core/prn
-                  ;;                 (constantly #(.println System/out (apply pr-str %&))))
-                  ))
-          
-          (let [[[context _] :as worlds] (&prelude/install &type-checker/+init+)]
-            (defn run [code]
-              (println "Code:" (pr-str code))
-              (let [monad (exec [parsed-code (&parser/parse code)]
-                            (&type-checker/check parsed-code))
-                    types (map (comp &translator/type->code second)
-                               (monad context))]
-                (doseq [type types]
-                  (->> type pr-str (println "Type:")))
-                (println "")
-                types)))
+  (time (do (defn test-contants! []
+              (do-template [<type> <form>]
+                (assert (= '<type> (run '<form>)))
+                
+                (nil)
+                nil
 
-          (defn test-contants! []
-            (do-template [<type> <form>]
-              (assert (= '<type> (run '<form>)))
-              
-              (nil)
-              nil
+                (true)
+                true
 
-              (true)
-              true
+                (10)
+                10
 
-              (10)
-              10
+                (10.0)
+                10.0
 
-              (10.0)
-              10.0
+                (\a)
+                \a
 
-              (\a)
-              \a
+                (:lol)
+                :lol
 
-              (:lol)
-              :lol
+                (10N)
+                10N
 
-              (10N)
-              10N
+                (10M)
+                10M
 
-              (10M)
-              10M
-
-              (1/2)
-              1/2))
+                (1/2)
+                1/2))
 
           (defn test-simple-forms! []
             (do-template [<type> <form>]
@@ -610,16 +610,43 @@
             ()
             (do (ann yolo java.lang.Long)
               (set! yolo "10"))
+
+            ('Yolo)
+            (defprotocol Yolo
+              (yolo [_]))
+
+            ((Protocol Yolo {yolo (Fn [Any -> Any])}))
+            (do (defprotocol Yolo
+                  (yolo [_]))
+              Yolo)
+
+            ((java.lang.Class Bar))
+            (do (defprotocol Foo
+                  (foo [_]))
+              (deftype Bar []
+                Foo
+                (foo [_] "BAR")))
+
+            ((java.lang.Class Bar))
+            (do (defprotocol Foo
+                  (foo [_]))
+              (defrecord Bar []
+                Foo
+                (foo [_] "BAR")))
             )))
 
   ;; (run ')
   
-  
+  (run '(do (defprotocol Foo
+              (foo [_]))
+          (defrecord Bar []
+            Foo
+            (foo [_] "BAR"))))
   
   
   
   ;; MISSING: Error messages.
-  ;; MISSING: def(protocol|type|record), proxy & reify, extend-protocol & family.
+  ;; MISSING: proxy & reify, extend-protocol & family.
   ;; MISSING: gen-class
   ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.
