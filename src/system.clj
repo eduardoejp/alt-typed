@@ -29,66 +29,147 @@
                   (->> type pr-str (println "Type:")))
                 (println "")
                 types)))
+
+          (defn test-contants! []
+            (do-template [<type> <form>]
+              (assert (= '<type> (run '<form>)))
+              
+              (nil)
+              nil
+
+              (true)
+              true
+
+              (10)
+              10
+
+              (10.0)
+              10.0
+
+              (\a)
+              \a
+
+              (:lol)
+              :lol
+
+              (10N)
+              10N
+
+              (10M)
+              10M
+
+              (1/2)
+              1/2))
+
+          (defn test-simple-forms! []
+            (do-template [<type> <form>]
+              (assert (= '<type> (run '<form>)))
+              
+              (nil)
+              (do nil)
+              
+              ((clojure.lang.Var Nothing))
+              (def foo)
+
+              ((clojure.lang.Var nil))
+              (def foo (do nil))
+
+              (nil)
+              (let [foo nil]
+                nil)
+
+              (10)
+              (let [foo 10]
+                foo)
+
+              (nil)
+              (do (def foo nil)
+                foo)
+
+              ((clojure.lang.Var 10))
+              (do (def foo 10)
+                #'foo)))
+
+          (defn test-simple-inference! []
+            (do-template [<type> <form>]
+              (assert (= '<type> (run '<form>)))
+              
+              ((Or nil java.lang.Long))
+              (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
+                (parse-int "1234"))
+
+              ((Or java.lang.Long "YOLO"))
+              (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
+                (let [result (parse-int "1234")]
+                  (if result
+                    result
+                    "YOLO")))
+
+              ((Fn (All [a] [a -> a])))
+              (fn id [x] x)
+
+              ((Fn [java.lang.String -> (Or nil java.lang.Long)]))
+              (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
+                (fn foo [x]
+                  (parse-int x)))
+
+              ((Fn [java.lang.String -> (Or java.lang.Long "YOLO")]))
+              (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
+                (fn foo [x]
+                  (let [result (parse-int x)]
+                    (if result
+                      result
+                      "YOLO"))))
+
+              ((Fn [clojure.lang.IPersistentMap -> :klk]
+                   [(Not clojure.lang.IPersistentMap) -> "manito"]))
+              (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
+                                [(Not clojure.lang.IPersistentMap) -> false]))
+                (fn foo [x]
+                  (if (map? x)
+                    :klk
+                    "manito")))
+              
+              ((Fn [clojure.lang.IPersistentMap -> :yolo]
+                   [(Not clojure.lang.IPersistentMap) -> "lol"]))
+              (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
+                                [(Not clojure.lang.IPersistentMap) -> false]))
+                (fn foo [x]
+                  (let [? (map? x)]
+                    (if ?
+                      :yolo
+                      "lol"))))
+
+              ((Fn [clojure.lang.IPersistentMap -> "manito"]
+                   [(Not clojure.lang.IPersistentMap) -> :klk]))
+              (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
+                                [(Not clojure.lang.IPersistentMap) -> false]))
+                (fn foo [x]
+                  (let [x (if (map? x)
+                            "manito"
+                            :klk)]
+                    x)))
+
+              (java.lang.Object)
+              (do (ann foo (Fn [java.lang.Object -> java.lang.Object]))
+                (foo "bar"))
+
+              ((Fn [1 -> "YOLO"]
+                   ["2" -> "LOL"]
+                   [:3 -> "MEME"]))
+              (fn case-test [x]
+                (case x
+                  1   "YOLO"
+                  "2" "LOL"
+                  :3  "MEME"))))
+
+          (test-contants!)
+          (test-simple-forms!)
+          (test-simple-inference!)
           
           (do-template [<type> <form>]
             (assert (= '<type> (run '<form>)))
             
-            (nil)
-            nil
-
-            (true)
-            true
-
-            (10)
-            10
-
-            (10.0)
-            10.0
-
-            (\a)
-            \a
-
-            (:lol)
-            :lol
-
-            (10N)
-            10N
-
-            (10M)
-            10M
-
-            (1/2)
-            1/2
-
-            (nil)
-            (do nil)
-            
-            ((clojure.lang.Var Nothing))
-            (def foo)
-
-            ((clojure.lang.Var nil))
-            (def foo (do nil))
-
-            (nil)
-            (let [foo nil]
-              nil)
-
-            (10)
-            (let [foo 10]
-              foo)
-
-            (nil)
-            (do (def foo nil)
-              foo)
-
-            ((clojure.lang.Var 10))
-            (do (def foo 10)
-              #'foo)
-
-            ((Or nil java.lang.Long))
-            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
-              (parse-int "1234"))
-
             (nil)
             (defalias (Maybe x) (Or nil x))
 
@@ -96,16 +177,6 @@
             (do (defalias IntOrString (Or java.lang.Integer java.lang.String))
               (ann yolo IntOrString)
               yolo)
-
-            ((Or java.lang.Long "YOLO"))
-            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
-              (let [result (parse-int "1234")]
-                (if result
-                  result
-                  "YOLO")))
-
-            ((Fn (All [a] [a -> a])))
-            (fn id [x] x)
 
             ('[])
             []
@@ -118,61 +189,6 @@
 
             ('[:klk "YOLO"])
             [:klk "YOLO"]
-            
-            ((Fn [java.lang.String -> (Or nil java.lang.Long)]))
-            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
-              (fn foo [x]
-                (parse-int x)))
-
-            ((Fn [java.lang.String -> (Or java.lang.Long "YOLO")]))
-            (do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
-              (fn foo [x]
-                (let [result (parse-int x)]
-                  (if result
-                    result
-                    "YOLO"))))
-
-            ((Fn [clojure.lang.IPersistentMap -> :klk]
-                 [(Not clojure.lang.IPersistentMap) -> "manito"]))
-            (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
-                              [(Not clojure.lang.IPersistentMap) -> false]))
-              (fn foo [x]
-                (if (map? x)
-                  :klk
-                  "manito")))
-            
-            ((Fn [clojure.lang.IPersistentMap -> :yolo]
-                 [(Not clojure.lang.IPersistentMap) -> "lol"]))
-            (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
-                              [(Not clojure.lang.IPersistentMap) -> false]))
-              (fn foo [x]
-                (let [? (map? x)]
-                  (if ?
-                    :yolo
-                    "lol"))))
-
-            ((Fn [clojure.lang.IPersistentMap -> "manito"]
-                 [(Not clojure.lang.IPersistentMap) -> :klk]))
-            (do (ann map? (Fn [clojure.lang.IPersistentMap -> true]
-                              [(Not clojure.lang.IPersistentMap) -> false]))
-              (fn foo [x]
-                (let [x (if (map? x)
-                          "manito"
-                          :klk)]
-                  x)))
-
-            (java.lang.Object)
-            (do (ann foo (Fn [java.lang.Object -> java.lang.Object]))
-              (foo "bar"))
-
-            ((Fn [1 -> "YOLO"]
-                 ["2" -> "LOL"]
-                 [:3 -> "MEME"]))
-            (fn case-test [x]
-              (case x
-                1   "YOLO"
-                "2" "LOL"
-                :3  "MEME"))
             
             ((Fn [1 -> "YOLO"] ["2" -> "LOL"] [:3 -> "MEME"] [Any -> "default"]))
             (fn case-test [x]
@@ -431,12 +447,25 @@
                 (only-exs x)))
 
             ((MultiFn (Fn (All [c] [c -> (java.lang.Class c)])) =>
-                      [[Any -> "It's a string!"]]))
+                      [[java.lang.String -> "It's a string!"]]))
+            (do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
+              (defmulti obj->string class)
+              (defmethod obj->string java.lang.String [_]
+                "It's a string!"))
+
+            ("It's a string!")
             (do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
               (defmulti obj->string class)
               (defmethod obj->string java.lang.String [_]
                 "It's a string!")
-              obj->string)
+              (obj->string "yolo"))
+
+            ()
+            (do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
+              (defmulti obj->string class)
+              (defmethod obj->string java.lang.String [_]
+                "It's a string!")
+              (obj->string :yolo))
 
             ((Fn (All [[a < (java.lang.Map Any Any)]] [a -> a])))
             (do (ann-class (java.lang.Map key val) [java.lang.Object])
@@ -566,7 +595,7 @@
               (defalias Primitive (Xor boolean byte short int long float double char))
               (ann aget (Fn (All [x] [(Array x) java.lang.Long -> x])))
               (aget (short-array 10) 0))
-
+            
             ((Fn (All [a] [(Array a) -> a])))
             (do (ann short-array (Fn [java.lang.Long -> (Array short)]))
               (defalias Primitive (Xor boolean byte short int long float double char))
@@ -589,7 +618,6 @@
   
   
   
-  ;; MISSING: multimethods
   ;; MISSING: Error messages.
   ;; MISSING: def(protocol|type|record), proxy & reify, extend-protocol & family.
   ;; MISSING: gen-class
@@ -620,23 +648,9 @@
   
   
   
-  (run '(do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
-          (defmulti obj->string class)
-          (defmethod obj->string java.lang.String [_]
-            "It's a string!")
-          obj->string))
+  
 
-  (run '(do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
-          (defmulti obj->string class)
-          (defmethod obj->string java.lang.String [_]
-            "It's a string!")
-          (obj->string "yolo")))
-
-  (run '(do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
-          (defmulti obj->string class)
-          (defmethod obj->string java.lang.String [_]
-            "It's a string!")
-          (obj->string :yolo)))
+  
   
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
@@ -663,7 +677,6 @@
 
   ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
   ;; TODO: The missing aesthetic changes on recursive types for correct translation + inference.
-  ;; TODO: Correct the inference issue with defmethod.
   ;; TODO: (Or Object nil) < Ref|Pointer, to constrain class-type args to avoid them being polymorphic over native types (which can happen with Any)
   ;; TODO: Take into account primitive type-tags and return type-tags.
   ;; TODO: Infer recursive types by analysing code.

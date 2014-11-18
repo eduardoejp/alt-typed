@@ -45,7 +45,7 @@
              [::hole id]]))))
 
 (defn get-hole [hole]
-  ;; (prn 'get-hole/_1 hole)
+  (prn 'get-hole hole)
   (match hole
     [::hole ?id]
     (fn [^Types state]
@@ -62,6 +62,7 @@
           '())))))
 
 (defn narrow-hole [hole top bottom]
+  (prn 'narrow-hole hole top bottom)
   (match hole
     [::hole ?id]
     (fn [state]
@@ -74,6 +75,7 @@
     ))
 
 (defn redirect-hole [from to]
+  (prn 'redirect-hole from to)
   (match [from to]
     [[::hole ?id] [::hole _]]
     (fn [state]
@@ -284,7 +286,8 @@
     ;;     (return true)))
 
     [_ [::hole _]]
-    (exec [[=top =bottom] (get-hole actual)
+    (exec [actual (normalize-hole actual)
+           [=top =bottom] (get-hole actual)
            :when (not= [::nothing] expected)
            =new-top ($and expected =top)
            ;; :let [_ (prn '=new-top =top expected =new-top)]
@@ -294,7 +297,8 @@
       (return true))
 
     [[::hole _] _]
-    (exec [[=top =bottom] (get-hole expected)
+    (exec [expected (normalize-hole expected)
+           [=top =bottom] (get-hole expected)
            :when (not= [::any] actual)
            =new-bottom ($or actual =bottom)
            ;; :let [_ (prn '=new-bottom =bottom actual =new-bottom)]
@@ -387,32 +391,36 @@
 
     [[::rec ?name ?type] _]
     (exec [=type (realize {} expected)
-           :let [_ (prn '=type =type)]]
+           ;; :let [_ (prn '=type =type)]
+           ]
       (solve =type actual))
 
     [_ [::rec ?name ?type]]
     (exec [=type (realize {} actual)
-           :let [_ (prn '=type =type)]]
+           ;; :let [_ (prn '=type =type)]
+           ]
       (solve expected =type))
 
     [[::rec-call ?ctor ?env ?params] _]
-    (exec [:let [_ (prn '?ctor ?ctor ?params)]
+    (exec [;; :let [_ (prn '?ctor ?ctor ?params)]
            =type-fn (realize {} ?ctor)
-           :let [_ (prn 'rec-call/=type-fn =type-fn)]
+           ;; :let [_ (prn 'rec-call/=type-fn =type-fn)]
            =params (map-m (partial realize ?env) ?params)
-           :let [_ (prn '=params =params)]
+           ;; :let [_ (prn '=params =params)]
            =type (apply =type-fn =params)
-           :let [_ (prn 'rec-call/=type =type)]]
+           ;; :let [_ (prn 'rec-call/=type =type)]
+           ]
       (solve =type actual))
 
     [_ [::rec-call ?ctor ?env ?params]]
-    (exec [:let [_ (prn '?ctor ?ctor ?params)]
+    (exec [;; :let [_ (prn '?ctor ?ctor ?params)]
            =type-fn (realize {} ?ctor)
-           :let [_ (prn 'rec-call/=type-fn =type-fn)]
+           ;; :let [_ (prn 'rec-call/=type-fn =type-fn)]
            =params (map-m (partial realize ?env) ?params)
-           :let [_ (prn '=params =params)]
+           ;; :let [_ (prn '=params =params)]
            =type (apply =type-fn =params)
-           :let [_ (prn 'rec-call/=type =type)]]
+           ;; :let [_ (prn 'rec-call/=type =type)]
+           ]
       (solve expected =type))
 
     [_ [::xor ?types]]
@@ -454,7 +462,7 @@
 
 ;; Monads / Type-functions
 (defn ^:private realize [bindings type]
-  (prn 'realize bindings type)
+  ;; (prn 'realize bindings type)
   (match type
     [::object ?class ?params]
     (exec [=params (map-m (partial realize bindings) ?params)]
@@ -509,7 +517,7 @@
        params))
 
 (defn apply [type-fn params]
-  (prn 'apply type-fn params)
+  ;; (prn 'apply type-fn params)
   (match type-fn
     [::alias ?name ?def]
     (apply ?def params)

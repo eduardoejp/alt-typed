@@ -405,12 +405,21 @@
                        (map-m (constantly &type/fresh-hole) ?args))
                ;; :let [_ (prn "#2")]
                =dispatch-val (check* ?dispatch-val)
+               :let [_ (prn '=dispatch-val =dispatch-val)
+                     _ (prn '?dispatch-fn ?dispatch-fn)]
                ;; :let [_ (prn "#3")]
                =return (&util/with-field :types
                          (&type/fn-call ?dispatch-fn =args))
                ;; :let [_ (prn "#4")]
+               :let [_ (prn '=return =return)]
                _ (&util/with-field :types
                    (&type/solve =return =dispatch-val))
+               =return* (&util/with-field :types
+                          (&type/prettify nil =return))
+               :let [_ (prn '=return* =return* '=dispatch-val =dispatch-val)]
+               =args* (&util/with-field :types
+                        (map-m (partial &type/prettify nil) =args))
+               :let [_ (prn '=args =args =args*)]
                ;; :let [_ (prn "#5" =return =dispatch-val =args)]
                worlds (&util/collect (exec [=return (with-env* (into {} (map vector ?args =args))
                                                       (check* ?body))]
@@ -425,8 +434,7 @@
                                  (return =new-multi-fn)))
                ;; :let [_ (prn "#7")]
                ]
-          (&util/with-field :types
-            (&type/instantiate* 'clojure.lang.Var [=new-multi-fn])))
+          (return =new-multi-fn))
 
         :else
         zero))
