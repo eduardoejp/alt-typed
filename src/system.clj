@@ -571,18 +571,24 @@
             (do (ann short-array (Fn [java.lang.Long -> (Array short)]))
               (defalias Primitive (Xor boolean byte short int long float double char))
               (ann aget (Fn (All [x] [(Array x) java.lang.Long -> x])))
-              ;; (aget (short-array 10) 0)
               (fn [x]
                 (aget x 0)))
+
+            (10)
+            (do (ann yolo java.lang.Long)
+              (set! yolo 10))
+
+            ()
+            (do (ann yolo java.lang.Long)
+              (set! yolo "10"))
             )))
 
+  ;; (run ')
   
   
-
   
   
   
-  ;; MISSING: set! special form.
   ;; MISSING: multimethods
   ;; MISSING: Error messages.
   ;; MISSING: def(protocol|type|record), proxy & reify, extend-protocol & family.
@@ -595,8 +601,8 @@
   ;; MISSING: Pre-inference annotating.
   ;; MISSING: Solving functions
   ;; MISSING: Multi-arity fns.
-  ;; MISSING: Take into account primitive type-tags and return type-tags.
-  ;; MISSING: (Or Object nil) < Ref|Pointer, to constrain class-type args to avoid them being polymorphic over native types (which can happen with Any)
+  ;; MISSING: 
+  ;; MISSING: 
   ;; MISSING: 
   
   (do (defn combinations [elems]
@@ -658,6 +664,10 @@
   ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
   ;; TODO: The missing aesthetic changes on recursive types for correct translation + inference.
   ;; TODO: Correct the inference issue with defmethod.
+  ;; TODO: (Or Object nil) < Ref|Pointer, to constrain class-type args to avoid them being polymorphic over native types (which can happen with Any)
+  ;; TODO: Take into account primitive type-tags and return type-tags.
+  ;; TODO: Infer recursive types by analysing code.
+  ;; TODO: 
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.

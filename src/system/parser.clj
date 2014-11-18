@@ -364,6 +364,11 @@
     (exec [*args (map-m parse ?args)]
       (return [::recur (vec *args)]))
 
+    (['set! ?target ?value] :seq)
+    (exec [*target (parse ?target)
+           *value (parse ?value)]
+      (return [::set! *target *value]))
+
     (['assert ?test & &?message] :seq)
     (exec [*test (parse ?test)
            *message (parse (first &?message))]

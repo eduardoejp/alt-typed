@@ -300,17 +300,23 @@
                       (map vector =recur =args)))]
       (return &type/+nothing+))
 
+    [::&parser/set! ?target ?value]
+    (exec [=value (check* ?value)
+           =target (check* ?target)
+           _ (&util/with-field :types
+               (&type/solve =target =value))]
+      (return =value))
+
     [::&parser/assert ?test ?message]
     (exec [=message (check* ?message)
            _ (&util/with-field :types
                (&type/solve &type/+any+ =message))
            =test (check* ?test)
-           _ (&util/try-all [(&util/with-field :types
-                               (&type/solve &type/+truthy+ =test))
-                             (&util/with-field :types
+           _ (&util/with-field :types
+               (&util/try-all [(&type/solve &type/+truthy+ =test)
                                (if (= &type/+boolean+ =test)
                                  (return true)
-                                 zero))])]
+                                 zero)]))]
       (return &type/+nil+))
     
     [::&parser/def ?var ?value]
