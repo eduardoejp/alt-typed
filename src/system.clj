@@ -17,12 +17,15 @@
       ;;                 (constantly #(.println System/out (apply pr-str %&))))
       ))
 
-(let [[[context _] :as worlds] (&prelude/install &type-checker/+init+)]
+(let [[[_ [context _]]] (&prelude/install &type-checker/+init+)]
+  ;; (prn 'context context)
   (defn run [code]
     (println "Code:" (pr-str code))
-    (let [monad (exec [parsed-code (&parser/parse code)]
+    (let [monad (exec [parsed-code (&parser/parse code)
+                       ;; :let [_ (prn 'parsed-code parsed-code)]
+                       ]
                   (&type-checker/check parsed-code))
-          types (map (comp &translator/type->code second)
+          types (map (comp &translator/type->code (comp second second))
                      (monad context))]
       (doseq [type types]
         (->> type pr-str (println "Type:")))
@@ -648,20 +651,26 @@
                 {:foo (fn [self] self)}))
             )))
 
+  
+
   ;; (run ')
   
-  
+  (run '(do (ann map? (Fn [clojure.lang.IPersistentMap -> true] [(Not clojure.lang.IPersistentMap) -> false]))
+          (fn foo [x]
+            (if (map? x)
+              :klk
+              "manito"))))
   
   ;; MISSING: Error messages.
-  ;; MISSING: gen-class & proxy
   ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.
+  ;; MISSING: Solving functions
+  ;; MISSING: Multi-arity fns.
   ;; MISSING: var-args
+  ;; MISSING: gen-class & proxy
   ;; MISSING: macro-expansion.
   ;; MISSING: Scope handling (public vs private)
   ;; MISSING: Pre-inference annotating.
-  ;; MISSING: Solving functions
-  ;; MISSING: Multi-arity fns.
   ;; MISSING: 
   ;; MISSING: 
   ;; MISSING: 

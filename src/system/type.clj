@@ -39,11 +39,11 @@
 (def fresh-hole
   (fn [^Types state]
     (let [id (-> state ^TypeHeap (.-heap) .-counter)]
-      (list [(update-in state [:heap]
-                        #(-> %
-                             (update-in [:counter] inc)
-                             (assoc-in [:mappings id] [[::any] [::nothing]])))
-             [::hole id]]))))
+      (&util/send-ok (update-in state [:heap]
+                                #(-> %
+                                     (update-in [:counter] inc)
+                                     (assoc-in [:mappings id] [[::any] [::nothing]])))
+                     [::hole id]))))
 
 (defn get-hole [hole]
   ;; (prn 'get-hole hole)
@@ -59,7 +59,7 @@
               ((get-hole =type) state)
 
               [?top ?bottom]
-              (list [state [?top ?bottom]])))
+              (&util/send-ok state [?top ?bottom])))
           '())))))
 
 (defn narrow-hole [hole top bottom]
@@ -67,7 +67,7 @@
   (match hole
     [::hole ?id]
     (fn [state]
-      (list [(assoc-in state [:heap :mappings ?id] [top bottom]) nil]))
+      (&util/send-ok (assoc-in state [:heap :mappings ?id] [top bottom]) nil))
     ;; (exec [[?top ?bottom] (get-hole hole)
     ;;        _ (solve ?top top)
     ;;        _ (solve bottom ?bottom)]
@@ -80,7 +80,7 @@
   (match [from to]
     [[::hole ?id] [::hole _]]
     (fn [state]
-      (list [(assoc-in state [:heap :mappings ?id] to) nil]))))
+      (&util/send-ok (assoc-in state [:heap :mappings ?id] to) nil))))
 
 (defn normalize-hole [hole]
   ;; (prn 'normalize-hole/_1 hole)
@@ -94,7 +94,7 @@
           ((normalize-hole =type) state)
           
           :else
-          (list [state hole]))
+          (&util/send-ok state hole))
         '()))))
 
 (defn poly-fn [num-args]
@@ -111,13 +111,13 @@
 (defn define-type [type-name type-def]
   (fn [^Types state]
     (when (not (-> state .-db (contains? type-name)))
-      (list [(assoc-in state [:db type-name] type-def) nil]))))
+      (&util/send-ok (assoc-in state [:db type-name] type-def) nil))))
 
 (defn resolve [type-name]
   (fn [^Types state]
     ;; (prn 'resolve type-name (-> state .-db (get type-name)) (-> state .-db))
     (when-let [type (-> state .-db (get type-name))]
-      (list [state type]))))
+      (&util/send-ok state type))))
 
 ;; Monads / Classes
 (defn ^:private qualify-class [class]
@@ -136,27 +136,25 @@
                           (let [hierarchy* (reduce #(derive %1 class-name %2)
                                                    (.-class-hierarchy state)
                                                    (for [[_ class _] parents] (qualify-class class)))]
-                            (list [(-> state
-                                       (assoc :class-hierarchy hierarchy*)
-                                       (assoc-in [:class-categories class] :class)
-                                       (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
-                                                                                [p-class [::all {} full-params [::object p-class p-params]]])
-                                                                              parents))))
-                                   nil]))
+                            (&util/send-ok (-> state
+                                               (assoc :class-hierarchy hierarchy*)
+                                               (assoc-in [:class-categories class] :class)
+                                               (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
+                                                                                        [p-class [::all {} full-params [::object p-class p-params]]])
+                                                                                      parents))))
+                                           nil))
                           '()))
                       ))]))
 
 (defn interface? [class]
   (fn [state]
     (if (= :interface (get-in state [:class-categories class]))
-      (list [state true])
+      (&util/send-ok state true)
       '())))
 
 (defn class-defined? [class]
   (fn [^Types state]
-    (if (-> state .-class-categories (contains? class))
-      (list [state true])
-      (list [state false]))))
+    (&util/send-ok state (-> state .-class-categories (contains? class)))))
 
 (defn define-class-members [class all-members]
   (exec [=class (resolve class)
@@ -171,19 +169,19 @@
                          [::function (list [::arity [?instance-type] =type])]])
                       )]]
     (fn [^Types state]
-      (list [(update-in state [:members]
-                        (fn [members]
-                          (reduce (fn [members [category entries]]
-                                    (if (= :ctor category)
-                                      (assoc-in members [[class category] class] entries)
-                                      (reduce (fn [members [name =type]]
-                                                (assoc-in members [[name category] class] (if (or (= :static-fields category)
-                                                                                                  (= :static-methods category))
-                                                                                            =type
-                                                                                            (wrap =type))))
-                                              members entries)))
-                                  members all-members)))
-             nil])
+      (&util/send-ok (update-in state [:members]
+                                (fn [members]
+                                  (reduce (fn [members [category entries]]
+                                            (if (= :ctor category)
+                                              (assoc-in members [[class category] class] entries)
+                                              (reduce (fn [members [name =type]]
+                                                        (assoc-in members [[name category] class] (if (or (= :static-fields category)
+                                                                                                          (= :static-methods category))
+                                                                                                    =type
+                                                                                                    (wrap =type))))
+                                                      members entries)))
+                                          members all-members)))
+                     nil)
       )))
 
 (defn member-candidates [[name category]]
@@ -191,15 +189,16 @@
     (for [[[name* category*] classes] (.-members state)
           :when (and (= name name*)
                      (= category category*))
-          class+type classes]
-      [state class+type])))
+          class+type classes
+          ret (&util/send-ok state class+type)]
+      ret)))
 
 (defn ^:private super-class? [super sub]
   (fn [^Types state]
     (let [hierarchy (.-class-hierarchy state)]
-      (list [state (and (defined? hierarchy super)
-                        (defined? hierarchy sub)
-                        (isa? hierarchy (qualify-class sub) (qualify-class super)))]))))
+      (&util/send-ok state (and (defined? hierarchy super)
+                                (defined? hierarchy sub)
+                                (isa? hierarchy (qualify-class sub) (qualify-class super)))))))
 
 (defn ^:private lineage* [hierarchy from to]
   (for [parent (get-in hierarchy [:parents from])
@@ -217,8 +216,8 @@
   (let [from* (qualify-class from)
         to* (qualify-class to)]
     (fn [^Types state]
-      (list [state (mapv (comp symbol name)
-                         (lineage* (.-class-hierarchy state) (qualify-class from) (qualify-class to)))]))
+      (&util/send-ok state (mapv (comp symbol name)
+                                 (lineage* (.-class-hierarchy state) (qualify-class from) (qualify-class to)))))
     ))
 
 ;; Monads / Solving
@@ -458,8 +457,8 @@
     (fn [state]
       (if (and (empty? ((solve ?type actual) state))
                (empty? ((solve actual ?type) state)))
-        (list [state true])
-        (zero nil)))
+        (&util/send-ok state true)
+        '()))
 
     [[::io] [::io]]
     (return true)
@@ -796,10 +795,10 @@
     (exec [=fn (upcast ::$fn =fn)]
       (match =fn
         [::function ?arities]
-        (fn [state]
-          (clojure.core/apply concat (pmap #((check-arity % =args) state) ?arities)))
-        ;; (exec [=arity (return-all ?arities)]
-        ;;   (check-arity =arity =args))
+        ;; (fn [state]
+        ;;   (clojure.core/apply concat (pmap #((check-arity % =args) state) ?arities)))
+        (exec [=arity (return-all ?arities)]
+          (check-arity =arity =args))
         ))))
 
 (defn holes [type]
@@ -842,6 +841,7 @@
     (return {})))
 
 (defn prettify [mappings type]
+  ;; (prn 'prettify mappings type)
   (match type
     [::hole _]
     (if-let [var-name (get mappings type)]

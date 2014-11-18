@@ -1,13 +1,21 @@
-(ns system.util)
+(ns system.util
+  (:require [clojure.core.match :refer [match]]))
 
 ;; [Interface]
 (defn bind [m-value step]
-  #(for [[state* datum] (m-value %)
-         result ((step datum) state*)]
+  #(for [input (do ;; (prn 'bind/% (class %))
+                 (m-value %))
+         ;; :let [_ (prn 'bind/input (nth input 0))]
+         result (match input
+                  [::ok [state* datum]]
+                  ((step datum) state*))]
      result))
 
+(defn send-ok [state value]
+  (list [::ok [state value]]))
+
 (defn return [value]
-  #(list [% value]))
+  #(send-ok % value))
 
 (def zero (fn [state] (list)))
 
@@ -42,10 +50,10 @@
 
 (defn return-all [data]
   #(for [datum data]
-     [% datum]))
+     [::ok [% datum]]))
 
 (def get-state
-  #(list [% %]))
+  #(send-ok % %))
 
 (defn try-all [steps]
   (fn [state]
@@ -56,7 +64,7 @@
     (mapcat #(% state) steps)))
 
 (defn collect [step]
-  #(list [% (step %)]))
+  #(send-ok % (step %)))
 
 (defn spread [returns]
   (fn [state]
@@ -64,5 +72,8 @@
 
 (defn with-field [field monad]
   (fn [state]
-    (for [[inner* return-val] (monad (field state))]
-      [(assoc state field inner*) return-val])))
+    ;; (prn 'with-field (class state))
+    (for [input (monad (field state))]
+      (match input
+        [::ok [?inner ?return-val]]
+        [::ok [(assoc state field ?inner) ?return-val]]))))

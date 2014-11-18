@@ -181,12 +181,11 @@
       (return [::&types/tuple (vec =elems)]))
 
     (['quote (?record :guard map?)] :seq)
-    (exec [=kvs (map-m
-                 (fn [[k v]]
-                   (exec [=k (parse-type-def local-syms k)
-                          =v (parse-type-def local-syms v)]
-                     (return [=k =v])))
-                 (seq ?record))]
+    (exec [=kvs (map-m (fn [[k v]]
+                         (exec [=k (parse-type-def local-syms k)
+                                =v (parse-type-def local-syms v)]
+                           (return [=k =v])))
+                       (seq ?record))]
       (return [::&types/record (into {} =kvs)]))
 
     [& ?arity]
@@ -237,7 +236,7 @@
     ))
 
 (defn ^:private parse-method [code]
-  (prn 'parse-method code)
+  ;; (prn 'parse-method code)
   (match code
     ([(?name :guard symbol?) & arities+doc] :seq)
     (let [arities (if (string? (last arities+doc))
@@ -510,7 +509,7 @@
 
     (['deftype ?name (?args :guard vector?) & ?impls] :seq)
     (let [*impls (reduce (fn [[context impls] token]
-                           (prn 'token token (class token))
+                           ;; (prn 'token token (class token))
                            (if (symbol? token)
                              [token impls]
                              (let [[?name ?args & ?forms] token]
@@ -521,7 +520,7 @@
 
     (['defrecord ?name (?args :guard vector?) & ?impls] :seq)
     (let [*impls (reduce (fn [[context impls] token]
-                           (prn 'token token (class token))
+                           ;; (prn 'token token (class token))
                            (if (symbol? token)
                              [token impls]
                              (let [[?name ?args & ?forms] token]
@@ -532,7 +531,7 @@
 
     (['reify & ?impls] :seq)
     (let [*impls (reduce (fn [[context impls] token]
-                           (prn 'token token (class token))
+                           ;; (prn 'token token (class token))
                            (if (symbol? token)
                              [token impls]
                              (let [[?name ?args & ?forms] token]
