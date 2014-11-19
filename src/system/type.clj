@@ -4,8 +4,8 @@
                      [template :refer [do-template]])
             [clojure.core.match :refer [match]]
             (system [util :as &util :refer [exec
-                                            map-m reduce-m
-                                            zero return return-all]])))
+                                            zero fail return return-all
+                                            map-m reduce-m]])))
 
 (declare $or $and apply
          solve realize
@@ -110,12 +110,13 @@
 ;; Monads / DB
 (defn define-type [type-name type-def]
   (fn [^Types state]
+    ;; (prn 'define-type type-name type-def state)
     (when (not (-> state .-db (contains? type-name)))
       (&util/send-ok (assoc-in state [:db type-name] type-def) nil))))
 
 (defn resolve [type-name]
   (fn [^Types state]
-    ;; (prn 'resolve type-name (-> state .-db (get type-name)) (-> state .-db))
+    ;; (prn 'resolve type-name (-> state .-db (get type-name)) (-> state .-db) state)
     (when-let [type (-> state .-db (get type-name))]
       (&util/send-ok state type))))
 
@@ -124,26 +125,26 @@
   (symbol "java::class" (name class)))
 
 (defn define-class [[class params full-params] parents]
+  ;; (prn 'define-class class params full-params parents)
   (&util/try-all [(exec [_ (resolve class)]
-                    zero)
+                    (fail (print-str "Can't redefine an existing class --" class)))
                   (exec [:let [=instance (if (empty? params)
                                            [::object class []]
                                            [::all {} full-params [::object class params]])]
                          _ (define-type class =instance)]
                     (fn [^Types state]
+                      ;; (prn 'define-class class state)
                       (let [class-name (qualify-class class)]
-                        (if (not (defined? (.-class-hierarchy state) class-name))
-                          (let [hierarchy* (reduce #(derive %1 class-name %2)
-                                                   (.-class-hierarchy state)
-                                                   (for [[_ class _] parents] (qualify-class class)))]
-                            (&util/send-ok (-> state
-                                               (assoc :class-hierarchy hierarchy*)
-                                               (assoc-in [:class-categories class] :class)
-                                               (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
-                                                                                        [p-class [::all {} full-params [::object p-class p-params]]])
-                                                                                      parents))))
-                                           nil))
-                          '()))
+                        (let [hierarchy* (reduce #(derive %1 class-name %2)
+                                                 (.-class-hierarchy state)
+                                                 (for [[_ class _] parents] (qualify-class class)))]
+                          (&util/send-ok (-> state
+                                             (assoc :class-hierarchy hierarchy*)
+                                             (assoc-in [:class-categories class] :class)
+                                             (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
+                                                                                      [p-class [::all {} full-params [::object p-class p-params]]])
+                                                                                    parents))))
+                                         nil)))
                       ))]))
 
 (defn interface? [class]
@@ -248,9 +249,7 @@
     (if (= ?target-class ?source-class)
       (return type)
       (exec [? (super-class? ?target-class ?source-class)
-             _ (if ?
-                 (return nil)
-                 zero)
+             _ (&util/assert! ? (print-str ?source-class "isn't a subclass of" ?target-class))
              family-line (lineage ?source-class ?target-class)
              ^Types types &util/get-state
              :let [casts (.-casts types)]]
@@ -329,15 +328,14 @@
     (return true)
 
     [[::literal ?e-class ?e-value] [::literal ?a-class ?a-value]]
-    (if (and (= ?e-class ?a-class)
-             (= ?e-value ?a-value))
+    (if (and (= ?e-class ?a-class) (= ?e-value ?a-value))
       (return true)
-      zero)
+      (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual))))
 
     [[::primitive ?type-1] [::primitive ?type-2]]
     (if (= ?type-1 ?type-2)
       (return true)
-      zero)
+      (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual))))
 
     [[::object ?class ?params] [::primitive ?type]]
     (if (or (and (= 'java.lang.Boolean ?class)   (= :boolean ?type))
@@ -349,13 +347,12 @@
             (and (= 'java.lang.Double ?class)    (= :double ?type))
             (and (= 'java.lang.Character ?class) (= :char ?type)))
       (return true)
-      zero)
+      (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual))))
     
     [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
-    (exec [? (super-class? ?class ?lit-class)]
-      (if ?
-        (return true)
-        zero))
+    (exec [? (super-class? ?class ?lit-class)
+           _ (&util/assert! ? (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))]
+      (return true))
 
     [[::object ?e-class ?e-params] [::object ?a-class ?a-params]]
     (if (= ?e-class ?a-class)
@@ -366,12 +363,12 @@
         (solve expected =actual)))
 
     [[::tuple ?e-parts] [::tuple ?a-parts]]
-    (if (<= (count ?e-parts) (count ?a-parts))
-      (exec [_ (map-m
-                (fn [[e a]] (solve e a))
-                (map vector ?e-parts ?a-parts))]
-        (return true))
-      zero)
+    (exec [_ (&util/assert! (<= (count ?e-parts) (count ?a-parts))
+                           (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))
+           _ (map-m
+              (fn [[e a]] (solve e a))
+              (map vector ?e-parts ?a-parts))]
+      (return true))
 
     [[::array ?e-type] [::array ?a-type]]
     (solve ?e-type ?a-type)
@@ -389,12 +386,12 @@
       (solve expected [::object 'clojure.lang.IPersistentMap [=keys =vals]]))
     
     [[::record ?e-entries] [::record ?a-entries]]
-    (if (set/superset? (set (keys ?e-entries)) (set (keys ?a-entries)))
-      (exec [_ (map-m
-                (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
-                (keys ?e-entries))]
-        (return true))
-      zero)
+    (exec [_ (&util/assert! (set/superset? (set (keys ?e-entries)) (set (keys ?a-entries)))
+                            (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))
+           _ (map-m
+              (fn [k] (solve (get ?e-entries k) (get ?a-entries k)))
+              (keys ?e-entries))]
+      (return true))
 
     [[::rec ?name ?type] _]
     (exec [=type (realize {} expected)
@@ -437,7 +434,7 @@
     [[::xor ?types] _]
     (exec [worlds (&util/collect (exec [=type (return-all ?types)]
                                    (solve =type actual)))
-           :when (= 1 (count worlds))]
+           _ (&util/assert! (not (> (count worlds) 1)) "Xor types can't match more than once.")]
       (&util/spread worlds))
     
     [[::union ?types] _]
@@ -455,16 +452,18 @@
 
     [[::complement ?type] _]
     (fn [state]
-      (if (and (empty? ((solve ?type actual) state))
-               (empty? ((solve actual ?type) state)))
+      (if (and (-> ((solve ?type actual) state)
+                   &util/clean-results first &util/ok? not)
+               (-> ((solve actual ?type) state)
+                   &util/clean-results first &util/ok? not))
         (&util/send-ok state true)
-        '()))
+        ((fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual))) state)))
 
     [[::io] [::io]]
     (return true)
 
     :else
-    zero
+    (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))
     ))
 
 ;; Monads / Type-functions
@@ -499,7 +498,7 @@
     (?token :guard symbol?)
     (if-let [=var (get bindings ?token)]
       (return =var)
-      zero)
+      (fail (print-str "Unknown type-var:" ?token "-- Environment contains:" (keys bindings))))
 
     [::all ?env ?params ?type-def]
     (return [::all (merge bindings ?env) ?params ?type-def])
@@ -539,10 +538,10 @@
         (if (= (count ?params) (count params))
           (realize (into ?env (map vector (prepare-params ?params) params))
                    ?type-def)
-          zero))
+          (fail (print-str "There was a mismatch with type-fn arguments." "Expected:" (count ?params) "Actual:" (count params)))))
     
     :else
-    zero))
+    (fail (pr-str "This type isn't a type-fn:" type-fn))))
 
 (defn instantiate [type]
   (match type
@@ -602,9 +601,13 @@
       
       [[<tag> ?base] _]
       (exec [veredicts (map-m (fn [=base]
-                                (&util/try-all [(exec [_ (solve =base addition)]
+                                (&util/try-all [(exec [_ (solve =base addition)
+                                                       ;; :let [_ (println "Base wins")]
+                                                       ]
                                                   (return <LT>))
-                                                (exec [_ (solve addition =base)]
+                                                (exec [_ (solve addition =base)
+                                                       ;; :let [_ (println "Addition wins")]
+                                                       ]
                                                   (return <GT>))
                                                 (return :peer)]))
                               ?base)]
@@ -625,16 +628,15 @@
       [_ _]
       (&util/try-all [(exec [_ (solve base addition)
                              ;; :let [_ (prn "<LT>")]
+                             ;; :let [_ (println "Base wins" base addition)]
                              ]
                         (return <LT-ret>))
                       (exec [_ (solve addition base)
                              ;; :let [_ (prn "<GT>")]
+                             ;; :let [_ (println "Addition wins" addition base)]
                              ]
                         (return <GT-ret>))
-                      (exec [_ (return nil)
-                             ;; :let [_ (prn "<=/=>")]
-                             ]
-                        (return [<tag> [base addition]]))])
+                      (return [<tag> [base addition]])])
       ))
 
   $or  ::union        base     addition :parent :child
@@ -726,9 +728,10 @@
                     (match [base addition]
                       [[::object ?filter _] [::object ?refinement _]]
                       (exec [?1 (interface? ?filter)
-                             ?2 (interface? ?refinement)
-                             :when (and ?1 ?2)]
-                        (return [::intersection [base addition]]))
+                             ?2 (interface? ?refinement)]
+                        (if (and ?1 ?2)
+                          (return [::intersection [base addition]])
+                          zero))
                       
                       :else
                       (return [::nothing]))])
@@ -760,6 +763,7 @@
     ))
 
 (defn parallel [t1 t2]
+  ;; (prn 'parallel t1 t2)
   (match [t1 t2]
     [[::eff ?data-1 ?effs-1] [::eff ?data-2 ?effs-2]]
     (exec [=data ($or ?data-1 ?data-2)
@@ -778,14 +782,17 @@
       (return [::eff =data ?effs-2]))
     
     [_ _]
-    ($or t1 t2)
+    (exec [=or ($or t1 t2)
+           ;; :let [_ (prn "ORed" t1 t2 =or)]
+           ]
+      (return =or))
     ))
 
 (letfn [(check-arity [=arity =args]
           (exec [=arity (instantiate =arity)]
             (match =arity
               [::arity ?args ?return]
-              (exec [:when (= (count ?args) (count =args))
+              (exec [_ (&util/assert! (= (count ?args) (count =args)) (print-str "Arity argument mismatch. Expected:" (count ?args) "Actual:" (count =args)))
                      _ (map-m (fn [[arg input]]
                                 (solve arg input))
                               (map vector ?args =args))]

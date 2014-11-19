@@ -9,8 +9,12 @@
 
 ;; [Interface]
 (def install
-  (exec [_ (&util/with-field :env
+  (exec [;; state &util/get-state
+         ;; :let [_ (prn 'java-lang/state1 state)]
+         _ (&util/with-field :env
              (&env/in-ns 'java.lang))
+         ;; state &util/get-state
+         ;; :let [_ (prn 'java-lang/state2 state)]
          parsed-code (&parser/parse '(do (ann-class java.lang.Object [])
                                        (ann-class (java.lang.Class x) [java.lang.Object])
                                        (ann-class java.lang.String [java.lang.Object])
@@ -31,5 +35,8 @@
                                        (ann-class java.lang.Exception [java.lang.Throwable])
                                        (ann-class (clojure.lang.Var x) [java.lang.Object])
                                        (ann-class (clojure.lang.PersistentList elems) [java.lang.Object])
-                                       (ann-class (clojure.lang.IPersistentSet elems) [java.lang.Object])))]
+                                       (ann-class (clojure.lang.IPersistentSet elems) [java.lang.Object])))
+         ;; state &util/get-state
+         ;; :let [_ (prn 'java-lang/state3 state)]
+         ]
     (&type-checker/check* parsed-code)))

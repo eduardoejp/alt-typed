@@ -6,5 +6,10 @@
 
 ;; [Interface]
 (def install
-  (exec [_ &java-lang/install]
+  (exec [;; state &util/get-state
+         ;; :let [_ (prn 'prelude/state1 state)]
+         _ &java-lang/install
+         ;; state &util/get-state
+         ;; :let [_ (prn 'prelude/state2 state)]
+         ]
     (return nil)))

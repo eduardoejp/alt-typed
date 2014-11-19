@@ -2,8 +2,8 @@
   (:require [clojure.set :as set]
             [clojure.core.match :refer [match]]
             (system [util :as &util :refer [exec
-                                            map-m reduce-m
-                                            zero return return-all]]
+                                            zero return return-all fail
+                                            map-m reduce-m]]
                     [type :as &types])))
 
 ;; [Utils]
@@ -31,12 +31,8 @@
     [(first ctor) (vec (rest ctor))]))
 
 (defn test-effects [*effs]
-  (exec [_ (if (not (empty? *effs))
-             (return nil)
-             zero)
-         _ (if (set/superset? #{:try :io} (set (keys *effs)))
-             (return nil)
-             zero)
+  (exec [_ (&util/assert! (not (empty? *effs)) "The effects can't be empty!")
+         _ (&util/assert! (set/superset? #{:try :io} (set (keys *effs))) "Effects can only be either :try or :io")
          _ (if-let [ex (:try *effs)]
              (&util/with-field :types
                (&types/solve [::&types/object 'java.lang.Exception []] ex))
@@ -221,7 +217,7 @@
                ;; :let [_ (prn '=def =def)]
                ]
           (return [::&types/rec ?local-name =def])))
-      zero)
+      (fail "Recursive types must have an args-vector containing only 1 symbol!"))
     
     ([?fn & ?params] :seq)
     (exec [=params (map-m (partial parse-type-def local-syms) ?params)
@@ -246,7 +242,7 @@
       (return [::pmethod ?name arities]))
     
     :else
-    zero))
+    (fail "Correct method syntax is (name args-list+ doc-string?) -- example: (foo [bar baz] [bar baz quux] \"Just an example\")")))
 
 ;; Functions
 (defn parse [code]

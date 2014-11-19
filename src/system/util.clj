@@ -2,13 +2,40 @@
   (:require [clojure.core.match :refer [match]]))
 
 ;; [Interface]
+(defn failure? [result]
+  (match result
+    [::failure _]
+    true
+
+    :else
+    false))
+
+(defn ok? [result]
+  (match result
+    [::ok _]
+    true
+
+    :else
+    false))
+
+(defn clean-results [results]
+  (cond (empty? results)
+        results
+
+        (every? failure? results)
+        (-> results first list)
+
+        :else
+        (filter ok? results)))
+
 (defn bind [m-value step]
-  #(for [input (do ;; (prn 'bind/% (class %))
-                 (m-value %))
-         ;; :let [_ (prn 'bind/input (nth input 0))]
-         result (match input
-                  [::ok [state* datum]]
-                  ((step datum) state*))]
+  #(for [input (clean-results (m-value %))
+         ;; :let [_ (prn 'input input)]
+         result (clean-results (match input
+                                 [::ok [state* datum]]
+                                 ((step datum) state*)
+                                 [::failure _]
+                                 (list input)))]
      result))
 
 (defn send-ok [state value]
@@ -16,6 +43,15 @@
 
 (defn return [value]
   #(send-ok % value))
+
+(defn fail [message]
+  (fn [_]
+    (list [::failure message])))
+
+(defn assert! [test message]
+  (if test
+    (return nil)
+    (fail message)))
 
 (def zero (fn [state] (list)))
 
@@ -26,6 +62,7 @@
   (reduce (fn [inner [label computation]]
             (case label
               :let `(let ~computation ~inner)
+              ;; :when (assert false "Can't use :when")
               :when `(if ~computation
                        ~inner
                        zero)
@@ -57,14 +94,29 @@
 
 (defn try-all [steps]
   (fn [state]
-    (some identity (map #(seq (% state)) steps))))
+    (if (empty? steps)
+      '()
+      (let [results (clean-results ((first steps) state))]
+        (if (ok? (first results))
+          results
+          (or ((try-all (rest steps)) state)
+              results))))
+    ;; (some identity (map #(seq (clean-results (% state))) steps))
+    ))
+
+(defn try-all* [steps]
+  (fn [state]
+    (if (empty? steps)
+      '()
+      (or (seq (clean-results ((first steps) state)))
+          ((try-all (rest steps)) state)))))
 
 (defn parallel [steps]
   (fn [state]
-    (mapcat #(% state) steps)))
+    (mapcat #(clean-results (% state)) steps)))
 
 (defn collect [step]
-  #(send-ok % (step %)))
+  #(send-ok % (clean-results (step %))))
 
 (defn spread [returns]
   (fn [state]
@@ -73,7 +125,14 @@
 (defn with-field [field monad]
   (fn [state]
     ;; (prn 'with-field (class state))
-    (for [input (monad (field state))]
-      (match input
-        [::ok [?inner ?return-val]]
-        [::ok [(assoc state field ?inner) ?return-val]]))))
+    (let [results (monad (field state))
+          ;; _ (prn 'results results)
+          results (clean-results results)
+          ;; _ (prn 'results results)
+          ]
+      (for [input results]
+        (match input
+          [::ok [?inner ?return-val]]
+          [::ok [(assoc state field ?inner) ?return-val]]
+          [::failure _]
+          input)))))

@@ -3,7 +3,7 @@
             [clojure.core.match :refer [match]]
             (system [util :as &util :refer [exec
                                             map-m reduce-m
-                                            zero return return-all]]
+                                            fail zero return return-all]]
                     [env :as &env]
                     [type :as &type]
                     [parser :as &parser]))
@@ -114,6 +114,7 @@
       )))
 
 (defn check* [form]
+  ;; (prn 'check* form)
   (match form
     [::&parser/#nil]
     (return &type/+nil+)
@@ -185,17 +186,18 @@
                               (&type/member-candidates [(-> ?symbol name symbol) :static-fields]))
              :when (= class (symbol ns))]
         (return =field))
-      (&util/try-all [(exec [=symbol (&util/with-field :env
-                                       (&env/resolve ?symbol))
-                             :when (not= &type/+macro+ =symbol)]
-                        (return =symbol))
-                      (exec [? (&util/with-field :types
-                                 (&type/class-defined? ?symbol))
-                             :when ?
-                             =inner (&util/with-field :types
-                                      (&type/instantiate* ?symbol))]
-                        (&util/with-field :types
-                          (&type/instantiate* 'java.lang.Class [=inner])))]))
+      (&util/try-all* [(exec [=symbol (&util/with-field :env
+                                        (&env/resolve ?symbol))]
+                         (if (not= &type/+macro+ =symbol)
+                           (return =symbol)
+                           (fail (str "Can't get value of a macro. [" ?symbol "]"))))
+                       (exec [? (&util/with-field :types
+                                  (&type/class-defined? ?symbol))
+                              :when ?
+                              =inner (&util/with-field :types
+                                       (&type/instantiate* ?symbol))]
+                         (&util/with-field :types
+                           (&type/instantiate* 'java.lang.Class [=inner])))]))
     
     [::&parser/do & ?forms]
     (exec [=forms (map-m (fn [?form]
@@ -516,8 +518,10 @@
       (return &type/+nil+))
 
     [::&parser/ann-class ?class ?parents ?fields+methods]
-    (exec [=class (&util/with-field :types
+    (exec [;; :let [_ (prn 'CHECK ::&parser/ann-class 0)]
+           =class (&util/with-field :types
                     (&type/define-class ?class ?parents))
+           ;; :let [_ (prn 'CHECK ::&parser/ann-class 1)]
            all-categories+members (map-m (fn [[category members]]
                                            (if (= :ctor category)
                                              (exec [=ctor (&parser/parse-type-def {} members)]
@@ -528,8 +532,11 @@
                                                                              members)]
                                                (return [category (into {} all-members+types)]))))
                                          (apply hash-map ?fields+methods))
+           ;; :let [_ (prn 'CHECK ::&parser/ann-class 2)]
            _ (&util/with-field :types
-               (&type/define-class-members (nth ?class 0) (into {} all-categories+members)))]
+               (&type/define-class-members (nth ?class 0) (into {} all-categories+members)))
+           ;; :let [_ (prn 'CHECK ::&parser/ann-class 3)]
+           ]
       (return &type/+nil+))
     
     [::&parser/defalias ?name ?type-def]
@@ -688,18 +695,19 @@
 
 ;; Functions
 (defn check [form]
-  #(let [results ((exec [state &util/get-state
-                         ;; :let [_ (prn 'check/form form (class state) state)]
-                         =type (check* form)
-                         state &util/get-state
-                         ;; :let [_ (prn '=type =type (class state) state)]
-                         ]
-                    (&util/with-field :types
-                      (&type/prettify nil =type))) %)]
-     (if (empty? results)
-       '()
-       (do ;; (prn '(count results) (count results) (mapv second results))
-           ((&util/with-field :types
-              (reduce-m &type/parallel &type/+nothing+ (map (comp second second) results)))
-            %)))
-     ))
+  #(let [results (&util/clean-results ((exec [;; state &util/get-state
+                                              ;; :let [_ (prn 'check/form form (class state) state)]
+                                              =type (check* form)
+                                              ;; :let [_ (prn '=type =type)]
+                                              ;; state &util/get-state
+                                              ;; :let [_ (prn '=type+state =type (class state) state)]
+                                              ]
+                                         (&util/with-field :types
+                                           (&type/prettify nil =type)))
+                                       %))]
+     ;; (prn 'check/results results)
+     (if (&util/failure? (first results))
+       results
+       (&util/clean-results ((&util/with-field :types
+                               (reduce-m &type/parallel &type/+nothing+ (map (comp second second) results)))
+                             %)))))

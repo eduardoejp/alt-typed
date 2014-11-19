@@ -1,11 +1,15 @@
 (ns system.translator
   (:require [clojure.core.match :refer [match]]
+            [system.util :as &util]
             [system.type :as &type]))
 
 ;; Functions
 (defn type->code [type]
   ;; (prn 'type->code type)
   (match type
+    [::&util/failure ?message]
+    ?message
+    
     [::&type/any]
     'Any
     

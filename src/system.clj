@@ -1,8 +1,8 @@
 (ns system
   (:require [clojure.template :refer [do-template]]
             (system [util :as &util :refer [exec
-                                            map-m reduce-m
-                                            zero return return-all]]
+                                            return return-all
+                                            map-m reduce-m]]
                     ;; [type :as &type]
                     [parser :as &parser]
                     [type-checker :as &type-checker]
@@ -17,22 +17,28 @@
       ;;                 (constantly #(.println System/out (apply pr-str %&))))
       ))
 
-(let [[[_ [context _]]] (&prelude/install &type-checker/+init+)]
-  ;; (prn 'context context)
+(let [[[_ [context _]] :as total] (&prelude/install &type-checker/+init+)]
+  ;; (prn 'context context 'total total)
   (defn run [code]
     (println "Code:" (pr-str code))
     (let [monad (exec [parsed-code (&parser/parse code)
                        ;; :let [_ (prn 'parsed-code parsed-code)]
                        ]
-                  (&type-checker/check parsed-code))
-          types (map (comp &translator/type->code (comp second second))
-                     (monad context))]
-      (doseq [type types]
-        (->> type pr-str (println "Type:")))
-      (println "")
-      types)))
+                  (&type-checker/check parsed-code))]
+      (let [results (&util/clean-results (monad context))]
+        (if (&util/failure? (first results))
+          (first results)
+          (let [types (map (comp &translator/type->code (comp second second))
+                           results)]
+            (doseq [type types]
+              (->> type pr-str (println "Type:")))
+            (println "")
+            types))
+        ))))
 
 (comment
+  (run nil)
+  
   (time (do (defn test-contants! []
               (do-template [<type> <form>]
                 (assert (= '<type> (run '<form>)))
@@ -211,7 +217,7 @@
 
             ('yolo)
             'yolo
-
+            
             ((clojure.lang.PersistentList (Or 1 'dos "tres")))
             '(1 dos "tres")
 
@@ -225,10 +231,10 @@
             (do (monitor-enter "YOLO")
               (monitor-exit "YOLO"))
 
-            ()
+            [::&util/failure "Can't solve types. Expected: [:system.type/complement [:system.type/nil]] Actual: [:system.type/nil]"]
             (monitor-enter nil)
 
-            ()
+            [::&util/failure "Can't solve types. Expected: [:system.type/complement [:system.type/nil]] Actual: [:system.type/nil]"]
             (monitor-exit nil)
 
             ((Eff Nothing {:try java.lang.Exception}))
@@ -294,7 +300,7 @@
               (binding [global "YOLO"]
                 1))
 
-            ()
+            [::&util/failure "Can't solve types. Expected: [:system.type/object java.lang.String []] Actual: [:system.type/literal java.lang.Long 10]"]
             (do (ann global java.lang.String)
               (binding [global 10]
                 1))
@@ -314,7 +320,7 @@
               (loop [a 0]
                 (recur (inc a))))
 
-            ()
+            [::&util/failure "Can't get value of a macro. [defn]"]
             (do (ann defn Macro)
               defn)
 
@@ -463,7 +469,7 @@
                 "It's a string!")
               (obj->string "yolo"))
 
-            ()
+            [::&util/failure "Can't solve types. Expected: [:system.type/object java.lang.String ()] Actual: [:system.type/literal clojure.lang.Keyword :yolo]"]
             (do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
               (defmulti obj->string class)
               (defmethod obj->string java.lang.String [_]
@@ -541,7 +547,7 @@
               (ann as-test (Fn (All [[a < Test]] [a -> a])))
               (as-test (list (list 10))))
 
-            ()
+            [::&util/failure "clojure.lang.PersistentList isn't a subclass of java.lang.Long"]
             (do (defalias Test
                   (Rec [x]
                        (Or java.lang.Long (clojure.lang.PersistentList x))))
@@ -582,7 +588,7 @@
               (ann f (Fn [java.lang.Integer -> int]))
               (f yolo))
 
-            ()
+            [::&util/failure "Can't solve types. Expected: [:system.type/primitive :int] Actual: [:system.type/object java.lang.Integer []]"]
             (do (ann yolo java.lang.Integer)
               (ann f (Fn [int -> java.lang.Integer]))
               (f yolo))
@@ -610,7 +616,7 @@
             (do (ann yolo java.lang.Long)
               (set! yolo 10))
 
-            ()
+            [::&util/failure "Can't solve types. Expected: [:system.type/object java.lang.Long []] Actual: [:system.type/literal java.lang.String \"10\"]"]
             (do (ann yolo java.lang.Long)
               (set! yolo "10"))
 
@@ -652,7 +658,6 @@
             )))
 
   
-
   ;; (run ')
   
   (run '(do (ann map? (Fn [clojure.lang.IPersistentMap -> true] [(Not clojure.lang.IPersistentMap) -> false]))
