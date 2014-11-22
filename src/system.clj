@@ -27,7 +27,8 @@
                   (&type-checker/check parsed-code))]
       (let [results (&util/clean-results (monad context))]
         (if (&util/failure? (first results))
-          (first results)
+          (do (println "")
+            (first results))
           (let [types (map (comp &translator/type->code (comp second second))
                            results)]
             (doseq [type types]
@@ -295,6 +296,11 @@
               (read-line)
               (throw (ex)))
 
+            ((Eff :yolo {:io IO}))
+            (do (ann println (Fn [java.lang.String -> (Eff nil {:io IO})]))
+              (println "YOLO")
+              :yolo)
+
             (1)
             (do (ann global java.lang.String)
               (binding [global "YOLO"]
@@ -456,11 +462,18 @@
                 (only-exs x)))
 
             ((MultiFn (Fn (All [c] [c -> (java.lang.Class c)])) =>
-                      [[java.lang.String -> "It's a string!"]]))
+                      [java.lang.String -> "It's a string!"]))
             (do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
               (defmulti obj->string class)
               (defmethod obj->string java.lang.String [_]
                 "It's a string!"))
+
+            ((MultiFn (Fn (All [c] [c -> (java.lang.Class c)])) =>
+                      (All [[a < java.lang.String]] [a -> a])))
+            (do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
+              (defmulti obj->string class)
+              (defmethod obj->string java.lang.String [s]
+                s))
 
             ("It's a string!")
             (do (ann class (Fn (All [c] [c -> (java.lang.Class c)])))
@@ -655,21 +668,26 @@
               (extend java.lang.String
                 Foo
                 {:foo (fn [self] self)}))
+
+            ((clojure.lang.PersistentList java.lang.String))
+            (do (ann map (Fn (All [a b] [(Fn [a -> b]) (clojure.lang.PersistentList a) -> (clojure.lang.PersistentList b)])))
+              (ann str (Fn [Any -> java.lang.String]))
+              (map str '(1 2 3)))
+
+            ((clojure.lang.PersistentList java.lang.Long))
+            (do (ann map (Fn (All [a b] [(Fn [a -> b]) (clojure.lang.PersistentList a) -> (clojure.lang.PersistentList b)])))
+              (ann inc (Fn [java.lang.Integer -> java.lang.Long]))
+              (ann get-list (Fn [-> (clojure.lang.PersistentList java.lang.Integer)]))
+              (map inc (get-list)))
             )))
 
   
   ;; (run ')
   
-  (run '(do (ann map? (Fn [clojure.lang.IPersistentMap -> true] [(Not clojure.lang.IPersistentMap) -> false]))
-          (fn foo [x]
-            (if (map? x)
-              :klk
-              "manito"))))
   
-  ;; MISSING: Error messages.
+  
   ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.
-  ;; MISSING: Solving functions
   ;; MISSING: Multi-arity fns.
   ;; MISSING: var-args
   ;; MISSING: gen-class & proxy
@@ -679,6 +697,10 @@
   ;; MISSING: 
   ;; MISSING: 
   ;; MISSING: 
+
+  
+
+  
   
   (do (defn combinations [elems]
         (distinct (for [head elems
@@ -727,6 +749,7 @@
   ;; TODO: (Or Object nil) < Ref|Pointer, to constrain class-type args to avoid them being polymorphic over native types (which can happen with Any)
   ;; TODO: Take into account primitive type-tags and return type-tags.
   ;; TODO: Infer recursive types by analysing code.
+  ;; TODO: Eliminate primitive types, as boxing makes them a pain in the ass.
   ;; TODO: 
   ;; TODO: 
   

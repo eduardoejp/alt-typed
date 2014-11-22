@@ -67,7 +67,10 @@
           (exec [user-vars* (map-m (fn [uv]
                                      (exec [[=top =bottom] (&util/with-field :types
                                                              (&type/get-hole (get rev-mappings uv)))]
-                                       (return [uv =top])))
+                                       (return [uv (if (and (= &type/+any+ =top)
+                                                            (not= &type/+nothing+ =bottom))
+                                                     =bottom
+                                                     =top)])))
                                    used-vars)]
             (return [::&type/all {} (vec user-vars*) arity*])))
         ))))
@@ -422,11 +425,11 @@
                ;; :let [_ (prn '=return =return)]
                _ (&util/with-field :types
                    (&type/solve =return =dispatch-val))
-               =return* (&util/with-field :types
-                          (&type/prettify nil =return))
+               ;; =return* (&util/with-field :types
+               ;;            (&type/prettify nil =return))
                ;; :let [_ (prn '=return* =return* '=dispatch-val =dispatch-val)]
-               =args* (&util/with-field :types
-                        (map-m (partial &type/prettify nil) =args))
+               ;; =args* (&util/with-field :types
+               ;;          (map-m (partial &type/prettify nil) =args))
                ;; :let [_ (prn '=args =args =args*)]
                ;; :let [_ (prn "#5" =return =dispatch-val =args)]
                worlds (&util/collect (exec [=return (with-env* (into {} (map vector ?args =args))
@@ -706,8 +709,13 @@
                                            (&type/prettify nil =type)))
                                        %))]
      ;; (prn 'check/results results)
-     (if (&util/failure? (first results))
-       results
-       (&util/clean-results ((&util/with-field :types
-                               (reduce-m &type/parallel &type/+nothing+ (map (comp second second) results)))
-                             %)))))
+     (cond (&util/failure? (first results))
+           results
+
+           (empty? results)
+           '()
+
+           :else
+           (&util/clean-results ((&util/with-field :types
+                                   (reduce-m &type/parallel &type/+nothing+ (map (comp second second) results)))
+                                 %)))))

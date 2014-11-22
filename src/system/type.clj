@@ -362,6 +362,16 @@
       (exec [=actual (upcast ?e-class actual)]
         (solve expected =actual)))
 
+    [[::function ([[::arity ?e-params ?e-return]] :seq)] [::function ([[::arity ?a-params ?a-return]] :seq)]]
+    (exec [_ (solve ?e-return ?a-return)
+           ;; :let [_ (prn 'RETURN (list ?e-return ?a-return))]
+           ;; :let [_ (prn 'ARGS/PRE (list ?a-params ?e-params))]
+           _ (map-m (fn [[a e]] (solve a e))
+                    (map vector ?a-params ?e-params))
+           ;; :let [_ (prn 'ARGS (list ?a-params ?e-params))]
+           ]
+      (return true))
+    
     [[::tuple ?e-parts] [::tuple ?a-parts]]
     (exec [_ (&util/assert! (<= (count ?e-parts) (count ?a-parts))
                            (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))

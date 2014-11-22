@@ -67,7 +67,7 @@
 
     [::&type/multi-fn ?dispatch-fn ?methods]
     `(~'MultiFn ~(type->code ?dispatch-fn) ~'=>
-                ~(mapv type->code ?methods))
+                ~@(map type->code ?methods))
     
     [::&type/all ?env ?vars ?poly]
     (let [vars* (mapv #(match %
