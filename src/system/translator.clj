@@ -87,9 +87,6 @@
     [::&type/rec-call [::&type/rec ?name ?def] ?env ?params]
     `(~?name ~@?params)
 
-    [::&type/primitive ?type]
-    (-> ?type name symbol)
-
     [::&type/protocol ?name ?methods]
     `(~'Protocol ~?name ~(into {} (map (fn [[name type]] [name (type->code type)])
                                        ?methods)))

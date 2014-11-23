@@ -586,45 +586,6 @@
               (ann as-test (Fn (All [[a < (Test java.lang.Long)]] [a -> a])))
               (as-test (list (list 10))))
 
-            (java.lang.Integer)
-            (do (ann yolo int)
-              (ann f (Fn [int -> java.lang.Integer]))
-              (f yolo))
-
-            (int)
-            (do (ann yolo int)
-              (ann f (Fn [java.lang.Integer -> int]))
-              (f yolo))
-
-            (int)
-            (do (ann yolo java.lang.Integer)
-              (ann f (Fn [java.lang.Integer -> int]))
-              (f yolo))
-
-            [::&util/failure "Can't solve types. Expected: [:system.type/primitive :int] Actual: [:system.type/object java.lang.Integer []]"]
-            (do (ann yolo java.lang.Integer)
-              (ann f (Fn [int -> java.lang.Integer]))
-              (f yolo))
-
-            (Primitive)
-            (do (ann short-array (Fn [java.lang.Long -> (Array short)]))
-              (defalias Primitive (Xor boolean byte short int long float double char))
-              (ann aget (Fn (All [[x < Primitive]] [(Array x) java.lang.Long -> x])))
-              (aget (short-array 10) 0))
-
-            (short)
-            (do (ann short-array (Fn [java.lang.Long -> (Array short)]))
-              (defalias Primitive (Xor boolean byte short int long float double char))
-              (ann aget (Fn (All [x] [(Array x) java.lang.Long -> x])))
-              (aget (short-array 10) 0))
-            
-            ((Fn (All [a] [(Array a) -> a])))
-            (do (ann short-array (Fn [java.lang.Long -> (Array short)]))
-              (defalias Primitive (Xor boolean byte short int long float double char))
-              (ann aget (Fn (All [x] [(Array x) java.lang.Long -> x])))
-              (fn [x]
-                (aget x 0)))
-
             (10)
             (do (ann yolo java.lang.Long)
               (set! yolo 10))
@@ -746,11 +707,9 @@
 
   ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
   ;; TODO: The missing aesthetic changes on recursive types for correct translation + inference.
-  ;; TODO: (Or Object nil) < Ref|Pointer, to constrain class-type args to avoid them being polymorphic over native types (which can happen with Any)
-  ;; TODO: Take into account primitive type-tags and return type-tags.
+  ;; TODO: Take into account return type-tags.
   ;; TODO: Infer recursive types by analysing code.
-  ;; TODO: Eliminate primitive types, as boxing makes them a pain in the ass.
-  ;; TODO: 
+  ;; TODO: On 'let forms, ensure refining goes over all possibilities.
   ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.

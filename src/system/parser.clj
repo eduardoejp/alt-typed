@@ -92,30 +92,6 @@
     (['quote (?value :guard symbol?)] :seq)
     (return [::&types/literal 'clojure.lang.Symbol ?value])
 
-    'boolean
-    (&types/$primitive :boolean)
-
-    'byte
-    (&types/$primitive :byte)
-
-    'short
-    (&types/$primitive :short)
-
-    'int
-    (&types/$primitive :int)
-
-    'long
-    (&types/$primitive :long)
-
-    'float
-    (&types/$primitive :float)
-
-    'double
-    (&types/$primitive :double)
-
-    'char
-    (&types/$primitive :char)
-
     'Any
     (return [::&types/any])
 

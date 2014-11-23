@@ -332,23 +332,6 @@
       (return true)
       (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual))))
 
-    [[::primitive ?type-1] [::primitive ?type-2]]
-    (if (= ?type-1 ?type-2)
-      (return true)
-      (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual))))
-
-    [[::object ?class ?params] [::primitive ?type]]
-    (if (or (and (= 'java.lang.Boolean ?class)   (= :boolean ?type))
-            (and (= 'java.lang.Byte ?class)      (= :byte ?type))
-            (and (= 'java.lang.Short ?class)     (= :short ?type))
-            (and (= 'java.lang.Integer ?class)   (= :int ?type))
-            (and (= 'java.lang.Long ?class)      (= :long ?type))
-            (and (= 'java.lang.Float ?class)     (= :float ?type))
-            (and (= 'java.lang.Double ?class)    (= :double ?type))
-            (and (= 'java.lang.Character ?class) (= :char ?type)))
-      (return true)
-      (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual))))
-    
     [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
     (exec [? (super-class? ?class ?lit-class)
            _ (&util/assert! ? (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))]
@@ -991,10 +974,6 @@
                 (symbol? value)
                 [::literal 'clojure.lang.Symbol value]
                 )))
-
-(defn $primitive [type]
-  (assert (contains? #{:boolean :byte :short :int :long :float :double :char} type))
-  (return [::primitive type]))
 
 (defn $array [type]
   (return [::array type]))
