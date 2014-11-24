@@ -32,7 +32,14 @@
                                                   :methods {doubleValue (Fn [-> java.lang.Double])}
                                                   :fields {value java.lang.Long})
                                        (ann-class java.lang.Throwable [java.lang.Object])
-                                       (ann-class java.lang.Exception [java.lang.Throwable])
+                                       (ann-class java.lang.Error [java.lang.Throwable])
+                                       (ann-class java.lang.Exception [java.lang.Throwable]
+                                                  :ctor (Fn [-> java.lang.Exception]))
+                                       (ann-class java.lang.RuntimeException [java.lang.Exception])
+                                       (ann-class java.lang.ArithmeticException [java.lang.RuntimeException]
+                                                  :ctor (Fn [-> java.lang.ArithmeticException]))
+                                       (ann-class java.lang.NullPointerException [java.lang.Exception]
+                                                  :ctor (Fn [-> java.lang.NullPointerException]))
                                        (ann-class (clojure.lang.Var x) [java.lang.Object])
                                        (ann-class (clojure.lang.PersistentList elems) [java.lang.Object])
                                        (ann-class (clojure.lang.IPersistentSet elems) [java.lang.Object])))

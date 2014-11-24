@@ -364,9 +364,44 @@
     [::&parser/throw ?ex]
     (exec [=ex (check* ?ex)
            _ (&util/with-field :types
-               (exec [=exception (&type/instantiate* 'java.lang.Throwable)]
-                 (&type/solve =exception =ex)))]
-      (return [::&type/eff &type/+nothing+ {:try =ex}]))
+               (exec [=throwable (&type/instantiate* 'java.lang.Throwable)]
+                 (&type/solve =throwable =ex)))]
+      (&util/try-all [(&util/parallel [(&util/with-field :types
+                                         (exec [=throwable (&type/instantiate* 'java.lang.Throwable)
+                                                =error (&type/instantiate* 'java.lang.Error)
+                                                =run-ex (&type/instantiate* 'java.lang.RuntimeException)
+                                                =!error (&type/$not =error)
+                                                =!run-ex (&type/$not =run-ex)
+                                                =showable (reduce-m &type/$and =throwable [=!error =!run-ex])
+                                                ;; :let [_ (prn '=showable =showable)]
+                                                _ (&type/solve =showable =ex)]
+                                           (return [::&type/eff &type/+nothing+ {:try =ex}])))
+                                       (&util/with-field :types
+                                         (exec [=error (&type/instantiate* 'java.lang.Error)
+                                                =run-ex (&type/instantiate* 'java.lang.RuntimeException)
+                                                =showable (reduce-m &type/$or =error [=run-ex])
+                                                ;; :let [_ (prn '=showable =showable)]
+                                                _ (&type/solve =showable =ex)]
+                                           (if (&type/type-var? =ex)
+                                             (exec [[=top =bottom :as =ex*] (&type/get-hole =ex)]
+                                               (fn [state]
+                                                 (if (not (&util/failed? ((&type/solve &type/+nothing+ =top) state)))
+                                                   (&util/fail* (str "Can't match this exception... [" =ex "]"))
+                                                   (&util/send-ok state &type/+nothing+))))
+                                             (fn [state]
+                                               (if (not (&util/failed? ((&type/solve &type/+nothing+ =ex) state)))
+                                                 (&util/fail* (str "Can't match this exception... [" =ex "]"))
+                                                 (&util/send-ok state &type/+nothing+))))
+                                           
+                                           ;; (&util/try-all [(exec [_ (&type/solve &type/+nothing+ =ex)]
+                                           ;;                   (fail (str "Can't match this exception... [" =ex "]")))
+                                           ;;                 (return &type/+nothing+)])
+                                           ))])
+                      (&util/with-field :types
+                        (exec [=showable (&type/instantiate* 'java.lang.Exception)
+                               _ (&type/solve =showable =ex)]
+                          (return [::&type/eff &type/+nothing+ {:try =ex}])))
+                      (fail (str "Can't match this exception... [" =ex "]"))]))
     
     [::&parser/try ?body ?catches ?finally]
     (exec [=body (check* ?body)
@@ -576,18 +611,19 @@
     
     [::&parser/method-call ?method ?obj ?args]
     (exec [=obj (check* ?obj)
-           :let [_ (prn '=obj =obj)]
+           ;; :let [_ (prn '=obj =obj)]
            =args (map-m check* ?args)
-           :let [_ (prn '=args =args)]
+           ;; :let [_ (prn '=args =args)]
            [class =method] (&util/with-field :types
                              (&type/member-candidates [?method :methods]))
-           :let [_ (prn '[class =method] [class =method])]
+           ;; :let [_ (prn '[class =method] [class =method])]
            _ (&util/with-field :types
                (exec [=object (&type/instantiate* class [])]
                  (&type/solve =object =obj)))
            =method (&util/with-field :types
                      (&type/fn-call =method (list =obj)))
-           :let [_ (prn '=method =method)]]
+           ;; :let [_ (prn '=method =method)]
+           ]
       (&util/with-field :types
         (&type/fn-call =method =args)))
 

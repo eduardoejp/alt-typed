@@ -213,7 +213,7 @@
                      (list parent)
                      
                      (get-in hierarchy [:ancestors parent to])
-                     (cons parent (lineage* parent to))
+                     (cons parent (lineage* hierarchy parent to))
                      
                      :else
                      '())]
@@ -583,6 +583,21 @@
       (return =hole))))
 
 ;; Monads / Types
+(defn $not [type]
+  (return (match type
+            [::complement ?inner]
+            ?inner
+
+            :else
+            [::complement type])))
+
+(defn not? [type]
+  (match type
+    [::complement ?inner]
+    true
+    :else
+    false))
+
 (do-template [<fn> <tag> <LT-ret> <GT-ret> <LT> <GT>]
   (defn <fn> [base addition]
     ;; (prn '<fn> base addition)
@@ -669,11 +684,25 @@
     
     [[::intersection ?base] _]
     (exec [veredicts (map-m (fn [=base]
+                              ;; (&util/try-all [(exec [_ (solve =base addition)]
+                              ;;                   (return :child))
+                              ;;                 (exec [_ (solve addition =base)]
+                              ;;                   (return :parent))
+                              ;;                 (return :peer)])
                               (&util/try-all [(exec [_ (solve =base addition)]
                                                 (return :child))
-                                              (exec [_ (solve addition =base)]
-                                                (return :parent))
-                                              (return :peer)]))
+                                              (match =base
+                                                [::complement ?inner]
+                                                (&util/try-all [(exec [_ (solve addition ?inner)]
+                                                                  (return :peer))
+                                                                (exec [_ (solve ?inner addition)]
+                                                                  (fail "No can do :P"))])
+                                                _
+                                                (&util/try-all [(exec [_ (solve addition =base)]
+                                                                  (return :parent))
+                                                                (return :peer)]))
+                                              ])
+                              )
                             ?base)]
       (cond (some (partial = :parent) veredicts)
             (return base)
@@ -700,19 +729,25 @@
                              ?2 (interface? ?refinement)]
                         (if (and ?1 ?2)
                           (return [::intersection [base addition]])
-                          (fail "Can only intersect interfaces")))
-                      
-                      :else
-                      (return [::nothing]))])
+                          (fail "Can only AND interfaces")))
+
+                      ;; [_ _]
+                      ;; (return [::nothing])
+                      ;; (return [::intersection [base addition]])
+                      [?base [::complement ?!addition]]
+                      (do ;; (prn '[?base addition] [?base addition])
+                        (if (not (not? ?base))
+                          (&util/try-all [(exec [_ (solve ?base ?!addition)]
+                                            (return [::intersection [?base addition]]))
+                                          (return [::nothing])])
+                          ;; (do (prn '[?base ?!addition] [?base ?!addition] [base addition])
+                          ;;   (return [::intersection [?base ?addition]]))
+                          (return [::nothing])))
+
+                      [_ _]
+                      (return [::nothing])
+                      )])
     ))
-
-(defn $not [type]
-  (return (match type
-            [::complement ?inner]
-            ?inner
-
-            :else
-            [::complement type])))
 
 (defn sequential [t1 t2]
   (match [t1 t2]
@@ -812,6 +847,13 @@
 
     [::array ?type]
     (holes ?type)
+
+    [::eff ?data ?effects]
+    (exec [data-holes (holes ?data)
+           try-holes (if-let [?try (get ?effects :try)]
+                       (holes ?try)
+                       (return {}))]
+      (return (merge-with + data-holes try-holes)))
     
     :else
     (return {})))
@@ -867,6 +909,15 @@
     (exec [=args (map-m (partial prettify mappings) ?args)
            =body (prettify mappings ?body)]
       (return [::arity =args =body]))
+
+    [::eff ?data ?effects]
+    (exec [=data (prettify mappings ?data)
+           =try (if-let [?try (get ?effects :try)]
+                  (prettify mappings ?try)
+                  (return nil))]
+      (return [::eff =data (if =try
+                             (assoc ?effects :try =try)
+                             ?effects)]))
     
     :else
     (return type)))

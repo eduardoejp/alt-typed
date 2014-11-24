@@ -654,11 +654,32 @@
 
             (Fn (All [[a < java.lang.Long]] [a -> a]))
             (fn ^java.lang.Long foo [x] x)
+
+            (Fn [Any -> (Eff Nothing {:try java.lang.Exception})])
+            (fn [x] (throw (new java.lang.Exception)))
+
+            (Fn [Any -> (Eff Nothing {:try java.lang.NullPointerException})])
+            (fn [x] (throw (new java.lang.NullPointerException)))
+
+            (Fn [Any -> Nothing])
+            (fn [x] (throw (new java.lang.ArithmeticException)))
+            
+            (Fn (All [[a < (And (Not java.lang.RuntimeException) java.lang.Exception)]] [a -> (Eff Nothing {:try a})]))
+            (fn [^java.lang.Exception x] (throw x))
+
+            (Fn (All [[a < java.lang.NullPointerException]] [a -> (Eff Nothing {:try a})]))
+            (fn [^java.lang.NullPointerException x] (throw x))
+
+            (Fn [java.lang.ArithmeticException -> Nothing])
+            (fn [^java.lang.ArithmeticException x] (throw x))
+
+            (Fn (All [[a < (And (Not java.lang.Error) (Not java.lang.RuntimeException) java.lang.Throwable)]] [a -> (Eff Nothing {:try a})]) [(Or java.lang.Error java.lang.RuntimeException) -> Nothing])
+            (fn [x] (throw x))
             )))
 
   
   ;; (run ')
-  
+
   
   
   ;; MISSING: Destructuring
@@ -672,9 +693,7 @@
   ;; MISSING: 
   ;; MISSING: 
   ;; MISSING: 
-
   
-
   
   
   (do (defn combinations [elems]
@@ -689,13 +708,12 @@
   
   
   
-  
-  
-  (run '(fn ^java.lang.Long foo [x] x))
-  
+  ;; TODO: The missing aesthetic changes on recursive types for correct translation + inference.
+  ;; TODO: Infer recursive types by analysing code.
+  ;; TODO: On 'let forms, ensure refining goes over all possibilities.
+  ;; TODO: 
 
-  
-  
+  ;; THE MISFITS
   ;; The one below is not supposed to type-check due to lack of
   ;; coverage of type possibilities.
   ;; Gotta make holes on check*, instead of on ::let
@@ -718,12 +736,6 @@
           (ann yolo (RecTest java.lang.Integer))
           yolo
           ))
-
-  ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
-  ;; TODO: The missing aesthetic changes on recursive types for correct translation + inference.
-  ;; TODO: Infer recursive types by analysing code.
-  ;; TODO: On 'let forms, ensure refining goes over all possibilities.
-  ;; TODO: 
   
   ;; Must fix issue with refining in order to get this to type-check.
   (run '(do (ann inc (Fn [(Or java.lang.Integer java.lang.Long) -> java.lang.Integer]))
@@ -745,6 +757,8 @@
           (let [cnt 0]
             (< cnt 10)
             (inc cnt))))
+
+  (run '(fn [^java.lang.RuntimeException x] (throw x)))
 
   
   ;; This is a valid way of implementing letfn using a macro...
