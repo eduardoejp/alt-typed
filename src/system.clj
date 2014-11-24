@@ -579,7 +579,7 @@
               (ann as-test (Fn (All [[a < Test]] [a -> a])))
               (as-test (list (list "10"))))
 
-            (Or java.lang.Long (clojure.lang.PersistentList (ctor elem)))
+            (Rec [ctor] (All [a] (Or java.lang.Long (clojure.lang.PersistentList (ctor java.lang.Long)))))
             (do (defalias Test
                   (Rec [ctor]
                        (All [elem]
@@ -588,7 +588,7 @@
               (ann as-test (Fn (All [[a < (Test java.lang.Long)]] [a -> a])))
               (as-test 10))
 
-            (Or java.lang.Long (clojure.lang.PersistentList (ctor elem)))
+            (Rec [ctor] (All [a] (Or java.lang.Long (clojure.lang.PersistentList (ctor java.lang.Long)))))
             (do (defalias Test
                   (Rec [ctor]
                        (All [elem]
@@ -693,7 +693,17 @@
   ;; MISSING: 
   ;; MISSING: 
   ;; MISSING: 
+
   
+  
+  (Or java.lang.Long (clojure.lang.PersistentList (ctor elem)))
+  (run '(do (defalias Test
+              (Rec [ctor]
+                   (All [elem]
+                        (Or elem (clojure.lang.PersistentList (ctor elem))))))
+          (ann list (Fn (All [x] [x -> (clojure.lang.PersistentList x)])))
+          (ann as-test (Fn (All [[a < (Test java.lang.Long)]] [a -> a])))
+          (as-test (list (list 10)))))
   
   
   (do (defn combinations [elems]
@@ -708,7 +718,6 @@
   
   
   
-  ;; TODO: The missing aesthetic changes on recursive types for correct translation + inference.
   ;; TODO: Infer recursive types by analysing code.
   ;; TODO: On 'let forms, ensure refining goes over all possibilities.
   ;; TODO: 

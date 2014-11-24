@@ -918,6 +918,18 @@
       (return [::eff =data (if =try
                              (assoc ?effects :try =try)
                              ?effects)]))
+
+    [::rec-call ?rec ?env ?params]
+    (exec [;; :let [_ (prn '?params ?params)
+           ;;       _ (prn 'REC [::rec-call ?rec ?env ?params])]
+           ;; =params (map-m (partial prettify (merge mappings ?env)) ?params)
+           :let [=params (map (fn [p]
+                                (or (get ?env p)
+                                    p))
+                              ?params)]
+           ;; :let [_ (prn '=params =params)]
+           ]
+      (return [::rec-call ?rec ?env =params]))
     
     :else
     (return type)))
