@@ -3,7 +3,7 @@
             [clojure.core.match :refer [match]]
             (system [util :as &util :refer [exec
                                             map-m reduce-m
-                                            fail zero return return-all]]
+                                            zero fail return return-all]]
                     [env :as &env]
                     [type :as &type]
                     [parser :as &parser]))
@@ -81,40 +81,38 @@
     (exec [=arities (map-m generalize-arity ?arities)]
       (return [::&type/function =arities]))))
 
+(defn separate [pred seq]
+  [(filter pred seq)
+   (filter (complement pred) seq)])
+
 (defn ^:private merge-arities [worlds]
-  ;; (prn 'merge-arities (map (comp second second) worlds))
+  ;; (prn 'merge-arities (map second worlds))
   (if (empty? worlds)
-    zero
-    (let [[[_ [state arity] :as world] & others] worlds
-          [taken left] (reduce (fn [[taken left] [_ [state* arity*] :as world*]]
-                                 (match [arity arity*]
-                                   [[::&type/all {} ?vars [::&type/arity ?args ?body]]
-                                    [::&type/all {} ?vars* [::&type/arity ?args* ?body*]]]
-                                   (if (and (= ?vars ?vars*)
-                                            (= ?args ?args*))
-                                     [(conj taken world*) left]
-                                     [taken (conj left world*)])
+    (return '())
+    (let [[[_ arity :as world] & others] worlds
+          [taken* left] (separate (fn [[_ arity*]]
+                                    (match [arity arity*]
+                                      [[::&type/all {} ?vars [::&type/arity ?args ?body]]
+                                       [::&type/all {} ?vars* [::&type/arity ?args* ?body*]]]
+                                      (and (= ?vars ?vars*) (= ?args ?args*))
 
-                                   [[::&type/arity ?args ?body] [::&type/arity ?args* ?body*]]
-                                   (if (= ?args ?args*)
-                                     [(conj taken world*) left]
-                                     [taken (conj left world*)])
+                                      [[::&type/arity ?args ?body] [::&type/arity ?args* ?body*]]
+                                      (= ?args ?args*)
 
-                                   :else
-                                   [taken (conj left world*)]))
-                               [[world] []]
-                               others)
+                                      :else
+                                      false))
+                                  others)
+          taken (conj taken* world)
           ;; _ (prn 'merge-arities/taken (map second taken))
           ]
-      (fn [state]
-        (let [batch (if (= 1 (count taken))
-                      (&util/send-ok state (-> taken first second second))
-                      (&util/send-ok state (let [[[_ [_ returns]]] ((&util/with-field :types
-                                                                      (reduce-m &type/parallel &type/+nothing+ (map #(-> % (nth 1) (nth 1) (nth 2)) taken))) state)]
-                                             (-> taken first second second (assoc-in [2] returns))))
-                      )]
-          (concat batch ((merge-arities left) state))))
-      )))
+      (exec [=current (if (= 1 (count taken))
+                        (return (-> taken first second))
+                        (exec [=returns (&util/with-field :types
+                                          (reduce-m &type/parallel &type/+nothing+ (map #(-> % second (nth 2)) taken)))]
+                          (return (-> taken first second (assoc-in [2] =returns)))))
+             =left (merge-arities left)]
+        (return (conj =left =current))))
+    ))
 
 (defn check* [form]
   ;; (prn 'check* form)
@@ -189,18 +187,18 @@
                               (&type/member-candidates [(-> ?symbol name symbol) :static-fields]))
              :when (= class (symbol ns))]
         (return =field))
-      (&util/try-all* [(exec [=symbol (&util/with-field :env
-                                        (&env/resolve ?symbol))]
-                         (if (not= &type/+macro+ =symbol)
-                           (return =symbol)
-                           (fail (str "Can't get value of a macro. [" ?symbol "]"))))
-                       (exec [? (&util/with-field :types
-                                  (&type/class-defined? ?symbol))
-                              :when ?
-                              =inner (&util/with-field :types
-                                       (&type/instantiate* ?symbol))]
-                         (&util/with-field :types
-                           (&type/instantiate* 'java.lang.Class [=inner])))]))
+      (&util/try-all [(exec [=symbol (&util/with-field :env
+                                       (&env/resolve ?symbol))]
+                        (if (not= &type/+macro+ =symbol)
+                          (return =symbol)
+                          (fail (str "Can't get value of a macro. [" ?symbol "]"))))
+                      (exec [? (&util/with-field :types
+                                 (&type/class-defined? ?symbol))
+                             :when ?
+                             =inner (&util/with-field :types
+                                      (&type/instantiate* ?symbol))]
+                        (&util/with-field :types
+                          (&type/instantiate* 'java.lang.Class [=inner])))]))
     
     [::&parser/do & ?forms]
     (exec [=forms (map-m (fn [?form]
@@ -228,7 +226,9 @@
           (check* [::&parser/let ?bindings ?body]))))
 
     [::&parser/if ?test ?then ?else]
-    (exec [=test (check* ?test)]
+    (exec [=test (check* ?test)
+           ;; :let [_ (prn ::&parser/if ?test =test)]
+           ]
       (&util/try-all [(&util/parallel [(exec [_ (&util/with-field :types
                                                   (&type/solve &type/+truthy+ =test))
                                               =test* (if (&type/type-var? =test)
@@ -237,7 +237,9 @@
                                                          (return =top))
                                                        (return =test))
                                               :when (and (not= =test* &type/+nothing+)
-                                                         (not= =test* &type/+boolean+))]
+                                                         (not= =test* &type/+boolean+))
+                                              ;; :let [_ (prn 'THEN ?then)]
+                                              ]
                                          (check* ?then))
                                        (exec [_ (&util/with-field :types
                                                   (&type/solve &type/+falsey+ =test))
@@ -247,14 +249,20 @@
                                                          (return =top))
                                                        (return =test))
                                               :when (and (not= =test* &type/+nothing+)
-                                                         (not= =test* &type/+boolean+))]
+                                                         (not= =test* &type/+boolean+))
+                                              ;; :let [_ (prn 'ELSE ?else)]
+                                              ]
                                          (check* ?else))])
                       (exec [_ (&util/with-field :types
                                  (&type/solve &type/+ambiguous+ =test))
                              =then (check* ?then)
-                             =else (check* ?else)]
-                        (&util/with-field :types
-                          (&type/parallel =then =else)))
+                             =else (check* ?else)
+                             ;; :let [_ (prn 'THEN-ELSE =then =else)]
+                             =then+else (&util/with-field :types
+                                          (&type/parallel =then =else))
+                             ;; :let [_ (prn 'THEN+ELSE =then+else)]
+                             ]
+                        (return =then+else))
                       ]))
     
     [::&parser/case ?value ?clauses ?default]
@@ -297,14 +305,16 @@
                           ?locals)
            =body (with-env (into {::recur (mapv second =locals)}
                                  =locals)
-                   (check* ?body))]
+                   (check* ?body))
+           ;; :let [_ (prn 'loop/=body =body)]
+           ]
       ;; (clean-holes (into #{} (map second =locals)) =body)
       (return =body))
 
     [::&parser/recur ?args]
     (exec [=recur (&util/with-field :env
                     (&env/resolve ::recur))
-           :when (= (count =recur) (count ?args))
+           _ (&util/assert! (= (count =recur) (count ?args)) (str "Mismatch in recur arguments. Expected: " (count =recur) " Actual: " (count ?args)))
            =args (map-m check* ?args)
            _ (&util/with-field :types
                (map-m (fn [[=e =a]] (&type/solve =a =e))
@@ -409,7 +419,7 @@
     [::&parser/defmethod ?name ?dispatch-val ?args ?body]
     (exec [=multi-fn (check* [::&parser/symbol ?name])
            ;; :let [_ (prn "#1" =multi-fn)]
-           ]
+           _ (&util/assert! (&type/multi-fn? =multi-fn) (str ?name " is not a multimethod."))]
       (match =multi-fn
         [::&type/multi-fn ?dispatch-fn ?methods]
         (exec [=args (&util/with-field :types
@@ -436,25 +446,26 @@
                                                       (check* ?body))]
                                        (generalize-arity [::&type/arity =args =return])))
                ;; :let [_ (prn "#6")]
-               =new-multi-fn (if (empty? worlds)
-                               zero
-                               (exec [=arities (&util/collect (merge-arities worlds))
-                                      :let [=new-multi-fn [::&type/multi-fn ?dispatch-fn (into ?methods (map (comp second second) =arities))]]
-                                      _ (&util/with-field :env
-                                          (&env/intern ?name =new-multi-fn))]
-                                 (return =new-multi-fn)))
+               =new-multi-fn (exec [=arities (merge-arities (&util/results worlds))
+                                    :let [=new-multi-fn [::&type/multi-fn ?dispatch-fn (into ?methods =arities)]]
+                                    _ (&util/with-field :env
+                                        (&env/intern ?name =new-multi-fn))]
+                               (return =new-multi-fn))
                ;; :let [_ (prn "#7")]
                ]
-          (return =new-multi-fn))
-
-        :else
-        zero))
+          (return =new-multi-fn))))
     
     [::&parser/monitor-enter ?object]
-    (exec [=object (check* ?object)
+    (exec [;; :let [_ (prn [::&parser/monitor-enter ?object])]
+           =object (check* ?object)
+           ;; :let [_ (prn '=object =object)]
            _ (&util/with-field :types
-               (exec [=limit (&type/$not &type/+nil+)]
-                 (&type/solve =limit =object)))]
+               (exec [=limit (&type/$not &type/+nil+)
+                      ;; :let [_ (prn '=limit =limit)]
+                      ]
+                 (&type/solve =limit =object)))
+           ;; :let [_ (prn 'DONE)]
+           ]
       (return &type/+nil+))
 
     [::&parser/monitor-exit ?object]
@@ -465,33 +476,34 @@
       (return &type/+nil+))
 
     [::&parser/binding ?bindings ?body]
-    (exec [_ (map-m
-              (fn [[label value]]
-                (match label
-                  [::&parser/symbol ?label]
-                  (exec [=var (&util/with-field :env
-                                (&env/resolve-var ?label))
-                         =value (check* value)]
-                    (&util/with-field :types
-                      (&type/solve =var =value)))
-                  
-                  :else
-                  zero))
-              ?bindings)]
+    (exec [_ (map-m (fn [[label value]]
+                      (match label
+                        [::&parser/symbol ?label]
+                        (exec [=var (&util/with-field :env
+                                      (&env/resolve-var ?label))
+                               =value (check* value)]
+                          (&util/with-field :types
+                            (&type/solve =var =value)))
+                        
+                        :else
+                        (fail "The left side of a binding MUST be a symbol.")))
+                    ?bindings)]
       (check* ?body))
     
     [::&parser/fn ?local-name ?args ?body]
     (let [[pre-post ?body] (match ?body
-                             [::&parser/do ?pre-post & ?forms]
-                             (if (and (map? ?pre-post)
-                                      (or (contains? ?pre-post :pre)
-                                          (contains? ?pre-post :post)))
-                               [?pre-post `[::&parser/do ~@?forms]]
+                             [::&parser/do & ?forms]
+                             (if (and (map? (first ?forms))
+                                      (or (contains? (first ?forms) :pre)
+                                          (contains? (first ?forms) :post)))
+                               [(first ?forms) `[::&parser/do ~@(rest ?forms)]]
                                [nil ?body]))]
       (exec [all-pre (map-m #(&parser/parse `(~'assert ~%)) (:pre pre-post))
-             ;; :let [_ (prn 'all-pre all-pre)]
+             ;; state &util/get-state
+             ;; :let [_ (prn 'all-pre all-pre 'state state)]
              all-post (map-m #(&parser/parse `(~'assert ~%)) (:post pre-post))
-             ;; :let [_ (prn 'all-post all-post)]
+             ;; state &util/get-state
+             ;; :let [_ (prn 'all-post all-post 'state state)]
              worlds (&util/collect (exec [=args (&util/with-field :types
                                                   (map-m &type/fresh-var ?args))
                                           ;; :let [_ (println "Post =args")]
@@ -508,12 +520,14 @@
                                                       (check* ?body)))
                                           _ (with-env* {'% =return}
                                               (map-m check* all-post))
+                                          ;; :let [_ (prn 'fn/=return =return)]
                                           ;; :let [_ (println "#2")]
                                           ]
                                      (generalize-arity [::&type/arity =args =return])))
-             :when (not (empty? worlds))]
-        (exec [=arities (&util/collect (merge-arities worlds))]
-          (return [::&type/function (map (comp second second) =arities)]))))
+             ;; :let [_ (prn ::&parser/fn 'worlds worlds)]
+             ]
+        (exec [=arities (merge-arities (&util/results worlds))]
+          (return [::&type/function =arities]))))
     
     [::&parser/ann ?var ?type]
     (exec [_ (&util/with-field :env
@@ -556,14 +570,18 @@
     
     [::&parser/method-call ?method ?obj ?args]
     (exec [=obj (check* ?obj)
+           :let [_ (prn '=obj =obj)]
            =args (map-m check* ?args)
+           :let [_ (prn '=args =args)]
            [class =method] (&util/with-field :types
                              (&type/member-candidates [?method :methods]))
+           :let [_ (prn '[class =method] [class =method])]
            _ (&util/with-field :types
                (exec [=object (&type/instantiate* class [])]
                  (&type/solve =object =obj)))
            =method (&util/with-field :types
-                     (&type/fn-call =method (list =obj)))]
+                     (&type/fn-call =method (list =obj)))
+           :let [_ (prn '=method =method)]]
       (&util/with-field :types
         (&type/fn-call =method =args)))
 
@@ -698,24 +716,16 @@
 
 ;; Functions
 (defn check [form]
-  #(let [results (&util/clean-results ((exec [;; state &util/get-state
-                                              ;; :let [_ (prn 'check/form form (class state) state)]
-                                              =type (check* form)
-                                              ;; :let [_ (prn '=type =type)]
-                                              ;; state &util/get-state
-                                              ;; :let [_ (prn '=type+state =type (class state) state)]
-                                              ]
-                                         (&util/with-field :types
-                                           (&type/prettify nil =type)))
-                                       %))]
-     ;; (prn 'check/results results)
-     (cond (&util/failure? (first results))
-           results
-
-           (empty? results)
-           '()
-
-           :else
-           (&util/clean-results ((&util/with-field :types
-                                   (reduce-m &type/parallel &type/+nothing+ (map (comp second second) results)))
-                                 %)))))
+  (exec [worlds (&util/collect (exec [;; state &util/get-state
+                                      ;; :let [_ (prn 'check/form form (class state) state)]
+                                      =type (check* form)
+                                      ;; :let [_ (prn '=type =type)]
+                                      ;; state &util/get-state
+                                      ;; :let [_ (prn '=type+state =type (class state) state)]
+                                      ]
+                                 (&util/with-field :types
+                                   (&type/prettify nil =type))))
+         ;; :let [_ (prn 'check/worlds worlds)]
+         ]
+    (&util/with-field :types
+      (reduce-m &type/parallel &type/+nothing+ (map second (&util/results worlds))))))

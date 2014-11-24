@@ -36,7 +36,7 @@
                          nil)
 
           :else
-          '())
+          (&util/zero nil))
     ))
 
 ;; [Interface]
@@ -104,7 +104,7 @@
     (if-let [=type (-> state ^NS (.-ns-current) .-all-symbols (get symbol))]
       (&util/send-ok state
                      =type)
-      '())))
+      (&util/zero nil))))
 
 (defn resolve [symbol]
   (fn [^Env state]

@@ -2,7 +2,7 @@
   (:require [clojure.set :as set]
             [clojure.core.match :refer [match]]
             (system [util :as &util :refer [exec
-                                            zero return return-all fail
+                                            return return-all fail
                                             map-m reduce-m]]
                     [type :as &types])))
 
@@ -112,11 +112,6 @@
     (exec [[*type & *types] (map-m (partial parse-type-def local-syms) (cons ?param ?params))]
       (&util/with-field :types
         (reduce-m &types/$or *type *types)))
-
-    (['Xor ?param & ?params] :seq)
-    (exec [[*type & *types] (map-m (partial parse-type-def local-syms) (cons ?param ?params))]
-      (&util/with-field :types
-        (reduce-m &types/$xor *type *types)))
 
     (['And ?param & ?params] :seq)
     (exec [[*type & *types] (map-m (partial parse-type-def local-syms) (cons ?param ?params))]

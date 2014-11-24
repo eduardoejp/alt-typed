@@ -1,59 +1,75 @@
 (ns system.util
   (:require [clojure.core.match :refer [match]]))
 
+;; [Utils]
+
+(defn ^:private join-results [base addition]
+  ;; (prn 'join-results base addition)
+  (match [base addition]
+    [[::ok ?old-worlds] [::ok ?new-worlds]]
+    [::ok (concat ?old-worlds ?new-worlds)]
+    
+    [[::failure _] [::ok ?worlds]]
+    addition
+    
+    [[::ok ?worlds] [::failure _]]
+    base
+    
+    [[::failure _] [::failure _]]
+    addition))
+
 ;; [Interface]
-(defn failure? [result]
-  (match result
+(defn merge-results [all-results]
+  ;; (when true ;; (not (seq? all-results))
+  ;;   (prn 'merge-results all-results))
+  (reduce join-results [::failure "No results!"] all-results))
+
+(defn results [output]
+  (match output
+    [::ok ?worlds]
+    ?worlds
+    
     [::failure _]
-    true
+    '()))
 
-    :else
-    false))
-
-(defn ok? [result]
-  (match result
+(defn failed? [output]
+  (match output
     [::ok _]
-    true
-
-    :else
-    false))
-
-(defn clean-results [results]
-  (cond (empty? results)
-        results
-
-        (every? failure? results)
-        (-> results first list)
-
-        :else
-        (filter ok? results)))
+    false
+    
+    [::failure _]
+    true))
 
 (defn bind [m-value step]
-  #(for [input (clean-results (m-value %))
-         ;; :let [_ (prn 'input input)]
-         result (clean-results (match input
-                                 [::ok [state* datum]]
-                                 ((step datum) state*)
-                                 [::failure _]
-                                 (list input)))]
-     result))
+  #(let [inputs (m-value %)]
+     ;; (prn 'bind/inputs inputs)
+     (match inputs
+       [::ok ?worlds]
+       (merge-results (for [[state* datum] ?worlds]
+                        ((step datum) state*)))
+       [::failure _]
+       inputs)))
 
 (defn send-ok [state value]
-  (list [::ok [state value]]))
+  [::ok (list [state value])])
 
 (defn return [value]
   #(send-ok % value))
 
+(defn fail* [message]
+  [::failure message])
+
 (defn fail [message]
   (fn [_]
-    (list [::failure message])))
+    [::failure message]))
 
 (defn assert! [test message]
   (if test
     (return nil)
     (fail message)))
 
-(def zero (fn [state] (list)))
+;; (def zero (fn [state] [::ok '()]))
+(def zero (fn [state] [::failure ""]))
 
 ;; Syntax
 (defmacro exec [steps return]
@@ -86,37 +102,39 @@
       (reduce-m f next (rest inputs)))))
 
 (defn return-all [data]
-  #(for [datum data]
-     [::ok [% datum]]))
+  (fn [state]
+    [::ok (for [datum data]
+            [state datum])]))
 
 (def get-state
   #(send-ok % %))
 
 (defn try-all [steps]
   (fn [state]
-    (if (empty? steps)
-      '()
-      (let [results (clean-results ((first steps) state))]
-        (if (ok? (first results))
-          results
-          (or ((try-all (rest steps)) state)
-              results))))
-    ;; (some identity (map #(seq (clean-results (% state))) steps))
-    ))
-
-(defn try-all* [steps]
-  (fn [state]
-    (if (empty? steps)
-      '()
-      (or (seq (clean-results ((first steps) state)))
-          ((try-all (rest steps)) state)))))
+    (let [results (for [step steps
+                        :let [output (step state)]
+                        :when (match output
+                                [::ok ?worlds]
+                                (not (empty? ?worlds))
+                                :else
+                                false)]
+                    output)]
+      (or (first results)
+          [::failure "No alternative worked!"]))))
 
 (defn parallel [steps]
   (fn [state]
-    (mapcat #(clean-results (% state)) steps)))
+    (let [all-results (map #(% state) steps)]
+      ;; (prn 'parallel/all-results all-results)
+      (merge-results all-results))))
 
 (defn collect [step]
-  #(send-ok % (clean-results (step %))))
+  #(match (step %)
+     [::ok ?worlds]
+     (send-ok % [::ok ?worlds])
+
+     ?failure
+     ?failure))
 
 (defn spread [returns]
   (fn [state]
@@ -125,14 +143,11 @@
 (defn with-field [field monad]
   (fn [state]
     ;; (prn 'with-field (class state))
-    (let [results (monad (field state))
-          ;; _ (prn 'results results)
-          results (clean-results results)
-          ;; _ (prn 'results results)
-          ]
-      (for [input results]
-        (match input
-          [::ok [?inner ?return-val]]
-          [::ok [(assoc state field ?inner) ?return-val]]
-          [::failure _]
-          input)))))
+    (let [output (monad (field state))]
+      ;; (prn 'with-field/output output)
+      (match output
+        [::ok ?results]
+        [::ok (for [[?inner ?return-val] ?results]
+                [(assoc state field ?inner) ?return-val])]
+        ?failure
+        ?failure))))

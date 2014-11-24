@@ -1,5 +1,6 @@
 (ns system
   (:require [clojure.template :refer [do-template]]
+            [clojure.core.match :refer [match]]
             (system [util :as &util :refer [exec
                                             return return-all
                                             map-m reduce-m]]
@@ -17,28 +18,37 @@
       ;;                 (constantly #(.println System/out (apply pr-str %&))))
       ))
 
-(let [[[_ [context _]] :as total] (&prelude/install &type-checker/+init+)]
-  ;; (prn 'context context 'total total)
+(let [context (&prelude/install &type-checker/+init+)]
+  ;; (prn 'context context)
   (defn run [code]
     (println "Code:" (pr-str code))
-    (let [monad (exec [parsed-code (&parser/parse code)
+    (let [monad (exec [_ (&util/spread context)
+                       parsed-code (&parser/parse code)
                        ;; :let [_ (prn 'parsed-code parsed-code)]
                        ]
                   (&type-checker/check parsed-code))]
-      (let [results (&util/clean-results (monad context))]
-        (if (&util/failure? (first results))
-          (do (println "")
-            (first results))
-          (let [types (map (comp &translator/type->code (comp second second))
-                           results)]
-            (doseq [type types]
-              (->> type pr-str (println "Type:")))
-            (println "")
-            types))
-        ))))
+      (match (monad nil)
+        [::&util/failure ?message]
+        (do (println "Error:" ?message)
+          (println "")
+          [::&util/failure ?message])
+        [::&util/ok ?worlds]
+        (let [types (map (comp &translator/type->code second) ?worlds)]
+          (doseq [type types]
+            (->> type pr-str (println "Type:")))
+          (println "")
+          types)))))
+
 
 (comment
   (run nil)
+
+  (run '(do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
+          (fn foo [x]
+            (let [result (parse-int x)]
+              (if result
+                result
+                "YOLO")))))
   
   (time (do (defn test-contants! []
               (do-template [<type> <form>]
@@ -326,7 +336,7 @@
               (loop [a 0]
                 (recur (inc a))))
 
-            [::&util/failure "Can't get value of a macro. [defn]"]
+            [::&util/failure "No alternative worked!"]
             (do (ann defn Macro)
               defn)
 
@@ -560,7 +570,7 @@
               (ann as-test (Fn (All [[a < Test]] [a -> a])))
               (as-test (list (list 10))))
 
-            [::&util/failure "clojure.lang.PersistentList isn't a subclass of java.lang.Long"]
+            [::&util/failure "Can't solve types. Expected: [:system.type/object clojure.lang.PersistentList [[:system.type/rec x [:system.type/union [[:system.type/object java.lang.Long []] [:system.type/object clojure.lang.PersistentList [x]]]]]]] Actual: [:system.type/literal java.lang.String \"10\"]"]
             (do (defalias Test
                   (Rec [x]
                        (Or java.lang.Long (clojure.lang.PersistentList x))))
@@ -645,7 +655,20 @@
   
   ;; (run ')
   
-  
+  (run '(fn _ [x] (. x (doubleValue))))
+
+  (run '(do (ann inc (Fn [java.lang.Long -> java.lang.Long]))
+          (ann = (Fn [Any Any -> java.lang.Boolean]))
+          (loop [a 0]
+            (if (= 10 a)
+              a
+              (recur (inc a))))))
+
+  (run '(do (ann parse-int (Fn [java.lang.String -> (Or nil java.lang.Long)]))
+          (let [result (parse-int "1234")]
+            (if result
+              result
+              "YOLO"))))
   
   ;; MISSING: Destructuring
   ;; MISSING: covariance, contravariance & invariance.

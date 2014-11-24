@@ -38,6 +38,7 @@
 ;; Monads / holes
 (def fresh-hole
   (fn [^Types state]
+    ;; (prn 'fresh-hole state)
     (let [id (-> state ^TypeHeap (.-heap) .-counter)]
       (&util/send-ok (update-in state [:heap]
                                 #(-> %
@@ -95,7 +96,7 @@
           
           :else
           (&util/send-ok state hole))
-        '()))))
+        (&util/fail (str "Unknown type-var. -- ID: " ?id))))))
 
 (defn poly-fn [num-args]
   (exec [=args (map-m (constantly fresh-hole) (repeat num-args nil))
@@ -111,14 +112,16 @@
 (defn define-type [type-name type-def]
   (fn [^Types state]
     ;; (prn 'define-type type-name type-def state)
-    (when (not (-> state .-db (contains? type-name)))
-      (&util/send-ok (assoc-in state [:db type-name] type-def) nil))))
+    (if (not (-> state .-db (contains? type-name)))
+      (&util/send-ok (assoc-in state [:db type-name] type-def) nil)
+      (&util/fail* (str "Can't redefine a type. -- Type: " type-name)))))
 
 (defn resolve [type-name]
   (fn [^Types state]
     ;; (prn 'resolve type-name (-> state .-db (get type-name)) (-> state .-db) state)
-    (when-let [type (-> state .-db (get type-name))]
-      (&util/send-ok state type))))
+    (if-let [type (-> state .-db (get type-name))]
+      (&util/send-ok state type)
+      (&util/fail* (str "Unknown type. -- Name: " type-name)))))
 
 ;; Monads / Classes
 (defn ^:private qualify-class [class]
@@ -131,27 +134,31 @@
                   (exec [:let [=instance (if (empty? params)
                                            [::object class []]
                                            [::all {} full-params [::object class params]])]
-                         _ (define-type class =instance)]
+                         ;; :let [_ (prn 'define-class "#1")]
+                         _ (define-type class =instance)
+                         ;; :let [_ (prn 'define-class "#2")]
+                         ]
                     (fn [^Types state]
                       ;; (prn 'define-class class state)
-                      (let [class-name (qualify-class class)]
-                        (let [hierarchy* (reduce #(derive %1 class-name %2)
-                                                 (.-class-hierarchy state)
-                                                 (for [[_ class _] parents] (qualify-class class)))]
-                          (&util/send-ok (-> state
-                                             (assoc :class-hierarchy hierarchy*)
-                                             (assoc-in [:class-categories class] :class)
-                                             (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
-                                                                                      [p-class [::all {} full-params [::object p-class p-params]]])
-                                                                                    parents))))
-                                         nil)))
+                      (let [class-name (qualify-class class)
+                            ;; _ (prn 'define-class "#3")
+                            hierarchy* (reduce #(derive %1 class-name %2)
+                                               (.-class-hierarchy state)
+                                               (for [[_ class _] parents] (qualify-class class)))
+                            ;; _ (prn 'define-class "#4")
+                            ]
+                        (&util/send-ok (-> state
+                                           (assoc :class-hierarchy hierarchy*)
+                                           (assoc-in [:class-categories class] :class)
+                                           (assoc-in [:casts class] (into {} (map (fn [[_ p-class p-params]]
+                                                                                    [p-class [::all {} full-params [::object p-class p-params]]])
+                                                                                  parents))))
+                                       nil))
                       ))]))
 
 (defn interface? [class]
   (fn [state]
-    (if (= :interface (get-in state [:class-categories class]))
-      (&util/send-ok state true)
-      '())))
+    (&util/send-ok state (= :interface (get-in state [:class-categories class])))))
 
 (defn class-defined? [class]
   (fn [^Types state]
@@ -186,13 +193,12 @@
       )))
 
 (defn member-candidates [[name category]]
-  (fn [^Types state]
-    (for [[[name* category*] classes] (.-members state)
-          :when (and (= name name*)
-                     (= category category*))
-          class+type classes
-          ret (&util/send-ok state class+type)]
-      ret)))
+  (exec [^Types state &util/get-state]
+    (return-all (for [[[name* category*] classes] (.-members state)
+                      :when (and (= name name*)
+                                 (= category category*))
+                      class+type classes]
+                  class+type))))
 
 (defn ^:private super-class? [super sub]
   (fn [^Types state]
@@ -268,6 +274,18 @@
 (defn solve [expected actual]
   ;; (prn 'solve expected actual)
   (match [expected actual]
+    [[::alias ?name ?type] _]
+    (solve ?type actual)
+
+    [_ [::alias ?name ?type]]
+    (solve expected ?type)
+    
+    [[::any] _]
+    (return true)
+
+    [_ [::nothing]]
+    (return true)
+
     [[::hole ?e-id] [::hole ?a-id]]
     (if (= ?e-id ?a-id)
       (return true)
@@ -294,7 +312,7 @@
     [_ [::hole _]]
     (exec [actual (normalize-hole actual)
            [=top =bottom] (get-hole actual)
-           :when (not= [::nothing] expected)
+           ;; :when (not= [::nothing] expected)
            =new-top ($and expected =top)
            ;; :let [_ (prn '=new-top =top expected =new-top)]
            ;; :when (not= [::nothing] =new-top)
@@ -305,24 +323,15 @@
     [[::hole _] _]
     (exec [expected (normalize-hole expected)
            [=top =bottom] (get-hole expected)
-           :when (not= [::any] actual)
+           ;; :when (not= [::any] actual)
            =new-bottom ($or actual =bottom)
            ;; :let [_ (prn '=new-bottom =bottom actual =new-bottom)]
            _ (solve =top =new-bottom)
-           _ (narrow-hole expected =top =new-bottom)]
+           ;; :let [_ (println "Fits indeed")]
+           _ (narrow-hole expected =top =new-bottom)
+           ;; :let [_ (println "#narrowthathole")]
+           ]
       (return true))
-
-    [[::alias ?name ?type] _]
-    (solve ?type actual)
-
-    [_ [::alias ?name ?type]]
-    (solve expected ?type)
-    
-    [[::any] _]
-    (return true)
-
-    [_ [::nothing]]
-    (return true)
 
     [[::nil] [::nil]]
     (return true)
@@ -334,6 +343,7 @@
 
     [[::object ?class ?params] [::literal ?lit-class ?lit-value]]
     (exec [? (super-class? ?class ?lit-class)
+           ;; :let [_ (prn `(~'super-class? ~?class ~?lit-class) ?)]
            _ (&util/assert! ? (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))]
       (return true))
 
@@ -357,10 +367,9 @@
     
     [[::tuple ?e-parts] [::tuple ?a-parts]]
     (exec [_ (&util/assert! (<= (count ?e-parts) (count ?a-parts))
-                           (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))
-           _ (map-m
-              (fn [[e a]] (solve e a))
-              (map vector ?e-parts ?a-parts))]
+                            (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))
+           _ (map-m (fn [[e a]] (solve e a))
+                    (map vector ?e-parts ?a-parts))]
       (return true))
 
     [[::array ?e-type] [::array ?a-type]]
@@ -420,16 +429,6 @@
            ]
       (solve expected =type))
 
-    [_ [::xor ?types]]
-    (exec [_ (map-m #(solve expected %) ?types)]
-      (return true))
-
-    [[::xor ?types] _]
-    (exec [worlds (&util/collect (exec [=type (return-all ?types)]
-                                   (solve =type actual)))
-           _ (&util/assert! (not (> (count worlds) 1)) "Xor types can't match more than once.")]
-      (&util/spread worlds))
-    
     [[::union ?types] _]
     (exec [=type (return-all ?types)
            _ (solve =type actual)]
@@ -445,19 +444,16 @@
 
     [[::complement ?type] _]
     (fn [state]
-      (if (and (-> ((solve ?type actual) state)
-                   &util/clean-results first &util/ok? not)
-               (-> ((solve actual ?type) state)
-                   &util/clean-results first &util/ok? not))
+      (if (and (&util/failed? ((solve ?type actual) state))
+               (&util/failed? ((solve actual ?type) state)))
         (&util/send-ok state true)
-        ((fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual))) state)))
-
+        (&util/fail* (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))))
+    
     [[::io] [::io]]
     (return true)
 
     :else
-    (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))
-    ))
+    (fail (print-str "Can't solve types." "Expected:" (pr-str expected) "Actual:" (pr-str actual)))))
 
 ;; Monads / Type-functions
 (defn ^:private realize [bindings type]
@@ -577,7 +573,9 @@
          (return =type-fn)))))
 
 (defn fresh-var [arg]
-  (exec [=hole fresh-hole]
+  (exec [;; state &util/get-state
+         ;; :let [_ (prn 'fresh-var/state1 state)]
+         =hole fresh-hole]
     (if-let [tag (-> arg meta :tag)]
       (exec [=tag (instantiate* tag)
              _ (solve =tag =hole)]
@@ -633,35 +631,11 @@
       ))
 
   $or  ::union        base     addition :parent :child
-  $xor ::xor          base     addition :parent :child
   ;; $and ::intersection addition base     :child  :parent
   )
 
 (defn $and [base addition]
   (match [base addition]
-    [_ [::xor ?addition]]
-    (exec [=refinement (return-all ?addition)]
-      (&util/try-all [(exec [_ (solve base =refinement)
-                             ;; :let [_ (prn "Case #1")]
-                             ]
-                        (return =refinement))
-                      (exec [_ (solve =refinement base)
-                             ;; :let [_ (prn "Case #2")]
-                             ]
-                        (return base))
-                      (match [base =refinement]
-                        [[::object ?filter _] [::object ?refinement _]]
-                        (exec [?1 (interface? ?filter)
-                               ?2 (interface? ?refinement)
-                               ;; :let [_ (prn "Case #3..." ?filter ?1 ?refinement ?2)]
-                               :when (and ?1 ?2)
-                               ;; :let [_ (prn "Case #3")]
-                               ]
-                          ($and base =refinement))
-                        
-                        :else
-                        (return base))]))
-    
     [_ [::union ?addition]]
     (reduce-m (fn [=filter =refinement]
                 ;; (prn '[AND] =filter =refinement)
@@ -678,10 +652,12 @@
                                   (exec [?1 (interface? ?filter)
                                          ?2 (interface? ?refinement)
                                          ;; :let [_ (prn "Case #3..." ?filter ?1 ?refinement ?2)]
-                                         :when (and ?1 ?2)
+                                         ;; :when (and ?1 ?2)
                                          ;; :let [_ (prn "Case #3")]
                                          ]
-                                    ($and =filter =refinement))
+                                    (if (and ?1 ?2)
+                                      ($and =filter =refinement)
+                                      (fail "Can only AND interfaces")))
                                   
                                   :else
                                   (return =filter))]))
@@ -724,7 +700,7 @@
                              ?2 (interface? ?refinement)]
                         (if (and ?1 ?2)
                           (return [::intersection [base addition]])
-                          zero))
+                          (fail "Can only intersect interfaces")))
                       
                       :else
                       (return [::nothing]))])
