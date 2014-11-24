@@ -518,6 +518,12 @@
                                                           (check* ?body))))
                                                     (with-env* (into {::recur =args} (map vector ?args =args))
                                                       (check* ?body)))
+                                          _ (&util/with-field :types
+                                              (if-let [tag (-> ?local-name meta :tag)]
+                                                (exec [=return-limit (&type/instantiate* tag)
+                                                       _ (&type/solve =return-limit =return)]
+                                                  (return nil))
+                                                (return nil)))
                                           _ (with-env* {'% =return}
                                               (map-m check* all-post))
                                           ;; :let [_ (prn 'fn/=return =return)]

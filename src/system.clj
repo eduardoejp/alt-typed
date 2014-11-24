@@ -651,6 +651,9 @@
               (ann inc (Fn [java.lang.Integer -> java.lang.Long]))
               (ann get-list (Fn [-> (clojure.lang.PersistentList java.lang.Integer)]))
               (map inc (get-list)))
+
+            (Fn (All [[a < java.lang.Long]] [a -> a]))
+            (fn ^java.lang.Long foo [x] x)
             )))
 
   
@@ -688,7 +691,7 @@
   
   
   
-  
+  (run '(fn ^java.lang.Long foo [x] x))
   
 
   
@@ -718,7 +721,6 @@
 
   ;; TODO: Don't add :try effects if the throwable is either an Error or a RuntimeException
   ;; TODO: The missing aesthetic changes on recursive types for correct translation + inference.
-  ;; TODO: Take into account return type-tags.
   ;; TODO: Infer recursive types by analysing code.
   ;; TODO: On 'let forms, ensure refining goes over all possibilities.
   ;; TODO: 
